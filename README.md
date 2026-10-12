@@ -10,6 +10,11 @@ This repository implements **Phase 1** using **Node.js, Express, and SQLite**, w
 
 This repository contains the full Node/Express/SQLite application, interface, tests, demo builder, and deployment setup. GitHub is the source of truth for code updates. Generated demos, dependencies, private environment settings, and customer records are excluded from Git; the demo can be rebuilt from its source. You can also download and extract a source ZIP from GitHub instead of cloning.
 
+On Windows, **Push to GitHub.cmd** uploads already committed changes to this
+repository's `main` branch and lets Git prompt for GitHub sign-in. It does not
+stage files, create commits, or force-push. Keep credentials and customer data
+out of commits; `.gitignore` excludes the usual private files.
+
 On Windows, after installing Node.js and downloading the source, you can double-click **Start Demo.cmd** inside the repository folder. It installs dependencies if needed, starts the simulated workspace, and opens your browser. Keep the terminal window open. **ERR_CONNECTION_REFUSED** means the browser cannot reach the server; a stopped server or a restricted preview environment can cause it. The standalone browser demo avoids local server connections entirely.
 
 Install [Node.js 24 or newer](https://nodejs.org/en/download). SQLite is included through Node's built-in `node:sqlite` module; a separate database server is not needed.
