@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#184c3f" />
+    <meta
+      name="description"
+      content="A little help turning happy customers into your next job."
+    />
+    <title>Tradesuite — Good work travels</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#dashboard" aria-label="Tradesuite home"
+          ><span class="brand-mark">t<span>↗</span></span
+          ><span>tradesuite<span class="brand-dot">.</span></span></a
+        >
+        <div class="business-switch">
+          <label for="business-select">YOUR BUSINESS</label
+          ><select id="business-select" aria-label="Choose business">
+            <option>Loading…</option></select
+          ><button class="text-button add-business" data-action="add-business">
+            + Add a business
+          </button>
+        </div>
+        <nav aria-label="Main navigation" id="main-nav"></nav>
+        <div class="sidebar-bottom">
+          <div class="little-stars">✦ &nbsp;✧ &nbsp;✦</div>
+          <strong>Good work travels.</strong>
+          <p>Make it easier for happy<br />customers to spread the word.</p>
+          <div class="admin-account">
+            <span class="avatar small">A</span
+            ><span><b>Your workspace</b><small>Admin access</small></span
+            ><span class="online-dot"></span>
+          </div>
+        </div>
+      </aside>
+      <div class="main-shell">
+        <header class="topbar">
+          <div class="breadcrumb">
+            Your workspace <span>/</span> <b id="page-name">Overview</b>
+          </div>
+          <div class="topbar-right">
+            <span id="mode-label" class="mode-label">Connecting…</span
+            ><span class="avatar tiny">A</span>
+          </div>
+        </header>
+        <div id="public-demo-notice" class="public-demo-notice" hidden></div>
+        <main id="main" tabindex="-1">
+          <div class="loading">Getting things ready…</div>
+        </main>
+        <footer class="page-footer">
+          <span>Made for the people who get the job done.</span
+          ><span>Tradesuite · Phase 1</span>
+        </footer>
+      </div>
+    </div>
+    <dialog id="modal"><div id="modal-content"></div></dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

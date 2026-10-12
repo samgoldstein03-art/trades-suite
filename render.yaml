@@ -1,0 +1,43 @@
+# This creates paid resources only when you approve deployment in Render.
+# Review Render's current estimate before creating this Blueprint.
+services:
+  - type: web
+    name: trades-suite
+    runtime: docker
+    plan: 0.5c-512mb
+    numInstances: 1
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    healthCheckPath: /healthz
+    maxShutdownDelaySeconds: 60
+    disk:
+      name: trades-suite-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: "10000"
+      - key: DATABASE_PATH
+        value: /var/data/suite.sqlite
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      - key: NUDGE_INTERVAL_MS
+        value: "60000"
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false
+      # Enter demo for the first deployment. Set twilio privately when ready.
+      # sync:false preserves this choice across future Blueprint syncs.
+      - key: SMS_MODE
+        sync: false
+      # ADMIN_ORIGIN and PUBLIC_BASE_URL default to RENDER_EXTERNAL_URL.
+      # Add explicit HTTPS values in Render's Environment tab for custom domains.
+      # Add each business's Twilio values privately in the Environment tab:
+      # BUSINESS_<SMS_KEY>_ACCOUNT_SID, _AUTH_TOKEN, and _PHONE_NUMBER.
+      # Never add those secret values to this file or Docker build arguments.

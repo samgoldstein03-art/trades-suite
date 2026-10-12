@@ -1,0 +1,25 @@
+{
+  "name": "trades-suite",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A simple review-request desk for small trades businesses.",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "demo": "node scripts/demo.js",
+    "build:browser-demo": "node scripts/build-browser-demo.js",
+    "check:twilio": "node scripts/check-twilio.js",
+    "test": "node --test tests/*.test.js",
+    "seed:demo": "node scripts/seed-demo.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "twilio": "^5.10.3"
+  }
+}

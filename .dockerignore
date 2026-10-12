@@ -1,0 +1,20 @@
+# Include only files needed to run the server. No local records or credentials.
+**
+!package.json
+!package-lock.json
+!src/
+!src/**
+!public/
+!public/**
+!scripts/
+!scripts/check-twilio.js
+!Dockerfile
+!.dockerignore
+
+# Keep these excluded even if they are accidentally placed under src or public.
+**/.env
+**/.env.*
+**/*.sqlite*
+**/*.pem
+**/*.key
+**/*.log
