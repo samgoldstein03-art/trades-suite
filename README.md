@@ -138,11 +138,12 @@ Send only with a valid basis for consent and retain the relevant records. The fo
 ## How the three-day nudge works
 
 - A successful initial request gets a follow-up due time **72 hours after it is sent**, stored in UTC.
-- The server checks for due requests at startup and then every minute by default. Keep the server running. If it was stopped, eligible overdue requests are checked when it starts again.
+- The server checks for due requests at startup and then every minute by default. Keep the server running. Closing the laptop, stopping the process, or losing power pauses checks; eligible overdue requests catch up when the server starts again.
+- The dashboard shows **Follow-ups last checked at** with the time of the most recent completed check. A timestamp that stops advancing means checks are no longer completing. Refresh the page to see the latest check; this indicator does not keep a stopped server running.
 - Only sent requests that are still unfinished, have no prior nudge attempt, and are eligible to receive texts can be nudged.
 - A successful follow-up moves the request to **Nudged**. There is no second automatic follow-up. Marking the request done before it is claimed prevents the nudge.
 - A nudge attempt is reserved in SQLite before contacting the provider so overlapping checks cannot send it twice. A request already being sent cannot be recalled.
-- Failed or uncertain attempts are logged for owner review and are not automatically retried. A failed nudge leaves the request at **Sent** with an error, without scheduling another nudge. A timeout can mean Twilio accepted the message but the app did not receive the response. Check Twilio's log before making another send; the app cannot guarantee exactly-once delivery across a provider/network failure.
+- Failed or uncertain attempts are logged and listed under **Attention needed** on the dashboard. They leave the request at **Sent** and are not automatically retried. After fixing a confirmed Twilio rejection, use **Retry nudge** for that request. Retrying still requires text permission, the original customer phone number, and valid business SMS settings. A timeout can mean Twilio accepted the message but the app did not receive the response, so uncertain sends cannot be retried from this button. Check Twilio's log and reconcile their outcome first; the app cannot guarantee exactly-once delivery across a provider/network failure.
 
 `NUDGE_INTERVAL_MS` changes how often the worker checks, **not** the 72-hour waiting period. There is no separate cron setup or background worker installation.
 
@@ -154,7 +155,7 @@ An initial send that remains uncertain or was interrupted while sending also blo
 npm test
 ```
 
-Tests use temporary databases, a simulated clock, and a fake SMS provider. They exercise the exact three-day boundary, a single nudge, business isolation, per-business credentials, completion/opt-out suppression, concurrent operations, failures, input validation, and signed incoming webhooks without sending real messages or touching your running app's data.
+Tests use temporary databases, a simulated clock, and a fake SMS provider. A restart test closes and reopens a persisted SQLite workspace after its nudge becomes overdue, then verifies that the startup check sends it once. The suite also exercises the exact three-day boundary, a single nudge, business isolation, per-business credentials, completion/opt-out suppression, concurrent operations, failures, input validation, rate limits, and signed incoming webhooks without sending real messages or touching your running app's data.
 
 For a visible walkthrough in **demo mode**:
 
@@ -176,6 +177,7 @@ The time simulation is unavailable in Twilio mode. Live sends always use the rea
 | `DATABASE_PATH`               | `data/suite.sqlite` | SQLite database file.                                                   |
 | `UPLOAD_DIR`                  | `data/uploads`      | Uploaded business logos.                                                |
 | `NUDGE_INTERVAL_MS`           | `60000`             | Automatic nudge check interval in milliseconds.                         |
+| `TRUST_PROXY_HOPS`            | `0`                 | `0` for direct/local access; `1` only behind one trusted ingress proxy, as configured in the Render template. |
 | `PUBLIC_BASE_URL`             | Render URL or unset | Exact public HTTPS origin for signed Twilio webhooks.                   |
 | `ADMIN_ORIGIN`                | Render URL or unset | Exact HTTPS origin of the hosted admin app.                             |
 | `ADMIN_USERNAME`              | `admin`             | Shared admin sign-in name.                                              |
@@ -189,6 +191,10 @@ Run one app instance for a workspace and use persistent local storage. The defau
 
 This phase has **one admin view and no per-business logins**. Private localhost use can run without a password. A hosted installation requires `ADMIN_PASSWORD` and an HTTPS admin origin; the app refuses to start without them. Browser HTTP Basic authentication protects the pages, API, and uploaded logos using `ADMIN_USERNAME` and `ADMIN_PASSWORD`. The `/healthz` route and signed Twilio webhook remain reachable without that password.
 
+API requests are limited to **300 per five minutes per IP address**. The shared admin sign-in has a stricter limit of **10 failed attempts per 15 minutes per IP address**, covering pages, API routes, and uploads. Successful sign-ins do not consume that failed-attempt allowance, but once it is exhausted even correct credentials must wait for the window to reset. A blocked request returns HTTP 429 with a `Retry-After` header. Counters are held in memory and reset when the process restarts; this matches the single-instance deployment below.
+
+For direct or localhost access, keep `TRUST_PROXY_HOPS=0`; forwarded IP headers are then ignored. The Render template sets `TRUST_PROXY_HOPS=1` for its trusted ingress proxy so rate limits use the visitor's address. Use `1` only when all requests must pass through that trusted proxy, which must replace untrusted forwarding information. A directly reachable app with this setting could allow callers to spoof their IP address and bypass the limits.
+
 Set `ADMIN_ORIGIN=https://your-admin.example` to the exact external origin, without a path or trailing slash, and preserve that host through the proxy. Render supplies `RENDER_EXTERNAL_URL`, which the app uses automatically when `ADMIN_ORIGIN` or `PUBLIC_BASE_URL` is blank. Other hosts require explicit settings. `PUBLIC_BASE_URL` can be a different host for the webhook. Use HTTPS at the hosting provider or reverse proxy. Business separation is enforced in the app and database; everyone with the shared admin password can access all businesses.
 
 ## Built and planned
@@ -201,27 +207,9 @@ The data model keeps businesses as the owner of contacts, review requests, messa
 
 ## Hosting
 
-### Publish the free browser demo
+### Recommended for real use: the full backend on Render
 
-The browser demo can be rebuilt and published independently of the backend:
-
-```powershell
-npm run build:browser-demo
-powershell -NoProfile -File scripts/publish-browser-demo.ps1
-```
-
-The publishing script uploads only the generated sample demo and font licenses
-to [here.now](https://here.now/docs), verifies the public page, and prints its URL.
-It saves the private ownership link and publication state in the ignored
-`.publish/` directory. Keep those files private. Running it again uses that state
-to update the same demo. Anonymous publications expire after 24 hours; use the
-saved ownership link to claim the site with a free account before it expires.
-This publishes a browser-only demo with simulated texts and browser-local data.
-It does not deploy Express, SQLite, or a background nudge worker.
-
-### Optional paid hosting: deploy the full backend on Render
-
-The repository includes a `Dockerfile`, `.dockerignore`, and `render.yaml` deployment template for an optional paid backend. **This is separate from the free browser demo and is not needed to try that demo.** These files prepare a hosted installation; their presence does not mean an image has been built, a paid service has been created, or a backend public link has been verified.
+**For real customers and automatic SMS follow-ups, use the full app on an always-running paid Render web service with persistent storage.** This keeps the nudge worker running when your laptop is closed and keeps SQLite records and logos across restarts. The repository includes a `Dockerfile`, `.dockerignore`, and `render.yaml` for this recommended path. These files prepare a hosted installation; their presence does not mean a service has been created or a backend public link has been verified. The free browser demo below remains available for trying the interface.
 
 This template uses **one paid web service and a 1 GB persistent disk**. Render requires paid compute for persistent disks. Its free web service can sleep and cannot retain this app's SQLite database on a persistent disk, so it is unsuitable for the automatic nudge worker. Review the current service and storage estimate in Render before approving creation. See [Render persistent disks](https://render.com/docs/disks), [free service limits](https://render.com/docs/free), and [current pricing](https://render.com/pricing).
 
@@ -244,8 +232,26 @@ Point that business's Twilio incoming-message webhook to `https://YOUR-SERVICE.o
 
 ### Storage and operation
 
-The disk is mounted at `/var/data`. Both `DATABASE_PATH=/var/data/suite.sqlite` and `UPLOAD_DIR=/var/data/uploads` point inside it, so records and logos survive restarts and redeployments. Keep both paths on persistent storage if you change them. Run exactly one service instance: the same process serves the dashboard and checks for due nudges every 60 seconds. No separate cron job or second worker is needed.
+The disk is mounted at `/var/data`. Both `DATABASE_PATH=/var/data/suite.sqlite` and `UPLOAD_DIR=/var/data/uploads` point inside it, so records and logos survive restarts and redeployments. Keep both paths on persistent storage if you change them. Run exactly one always-running service instance: the same process serves the dashboard and checks for due nudges every 60 seconds. Check the dashboard's **Follow-ups last checked at** timestamp to confirm checks continue. A restart or redeploy pauses checks briefly, and eligible overdue requests catch up immediately on startup. No separate cron job or second worker is needed.
 
 Render's health check calls `/healthz`. The server listens on `0.0.0.0` and the configured `PORT`, as required for [Render web services](https://render.com/docs/web-services#port-binding). The template disables automatic deploys; use a manual deploy when you want to release a reviewed change. Services with an attached disk briefly stop during redeploys, and their disk cannot be shared across multiple instances. Keep a separate, consistent SQLite and logo backup as described above. See [disk deployment limits](https://render.com/docs/disks#disk-limitations-and-considerations).
 
 For another host, use the same Docker image with a persistent volume at `/var/data` writable by the container's `node` user (UID 1000). Supply the admin password, exact public HTTPS origins, and each business's Twilio settings as runtime environment variables. Terminate HTTPS at the hosting provider or reverse proxy and keep one always-running instance.
+
+### Publish the free browser demo
+
+The browser demo can be rebuilt and published independently of the backend:
+
+```powershell
+npm run build:browser-demo
+powershell -NoProfile -File scripts/publish-browser-demo.ps1
+```
+
+The publishing script uploads only the generated sample demo and font licenses
+to [here.now](https://here.now/docs), verifies the public page, and prints its URL.
+It saves the private ownership link and publication state in the ignored
+`.publish/` directory. Keep those files private. Running it again uses that state
+to update the same demo. Anonymous publications expire after 24 hours; use the
+saved ownership link to claim the site with a free account before it expires.
+This publishes a browser-only demo with simulated texts and browser-local data.
+It does not deploy Express, SQLite, or a background nudge worker.

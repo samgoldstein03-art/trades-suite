@@ -22,6 +22,9 @@ services:
         value: 0.0.0.0
       - key: PORT
         value: "10000"
+      # All public requests arrive through Render's ingress proxy.
+      - key: TRUST_PROXY_HOPS
+        value: "1"
       - key: DATABASE_PATH
         value: /var/data/suite.sqlite
       - key: UPLOAD_DIR

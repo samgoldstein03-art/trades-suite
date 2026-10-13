@@ -7,6 +7,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openDatabase, transaction } from "./db.js";
 import { createAdminAccess } from "./admin.js";
+import { configureProxyTrust, createApiRateLimit } from "./rate-limits.js";
 import {
   buildSms,
   credentialsFor,
@@ -93,9 +94,11 @@ export function createApp({
   const admin = createAdminAccess();
   const db = openDatabase(dbPath);
   const app = express();
+  configureProxyTrust(app);
   const uploadPath = resolve(uploadDir);
   mkdirSync(uploadPath, { recursive: true });
   const stamp = () => new Date(now()).toISOString();
+  let workerLastCheckedAt = null;
   const getBusiness = (id) => {
     const business = db
       .prepare("SELECT * FROM businesses WHERE id = ?")
@@ -373,6 +376,7 @@ export function createApp({
     db.prepare("SELECT 1").get();
     res.set("Cache-Control", "no-store").json({ status: "ok" });
   });
+  app.use("/api", createApiRateLimit());
   app.use(admin.middleware);
 
   app.use("/api", (req, res, next) => {
@@ -874,13 +878,122 @@ export function createApp({
       ORDER BY r.nudge_due_at`,
       )
       .all(business.id, smsMode);
+    const attention = db.prepare(
+      `SELECT r.*, c.name AS contact_name, c.phone AS contact_phone
+       FROM review_requests r JOIN contacts c ON c.id=r.contact_id AND c.business_id=r.business_id
+       WHERE r.business_id=? AND r.mode=? AND r.status='sent' AND r.nudge_error IS NOT NULL
+         AND EXISTS(SELECT 1 FROM sms_messages m WHERE m.business_id=r.business_id AND m.request_id=r.id AND m.kind='nudge')
+       ORDER BY r.nudge_attempted_at, r.id`,
+    ).all(business.id, smsMode).map((request) => ({ ...request, ...nudgeRetryState(request) }));
     res.json({
       ...totals,
       awaiting_nudge: upcoming.length,
       recent_activity: activities(business.id, 8),
       upcoming_nudges: upcoming.slice(0, 8),
+      attention_needed: attention,
+      worker_last_checked_at: workerLastCheckedAt,
     });
   });
+
+  function nudgeRetryState(request) {
+    const blocked = (reason) => ({ retry_allowed: false, retry_blocked_reason: reason });
+    if (request.status !== "sent" || request.mode !== smsMode || !request.nudge_error)
+      return blocked("This request does not have a failed follow-up to retry.");
+    const attempts = db.prepare(
+      "SELECT delivery_status FROM sms_messages WHERE business_id=? AND request_id=? AND kind='nudge' ORDER BY rowid DESC",
+    ).all(request.business_id, request.id);
+    if (!attempts.length) return blocked("This follow-up was stopped before a text was sent.");
+    // An uncertain response or interrupted send may already have reached Twilio.
+    // Only a confirmed rejection can safely be retried without sending twice.
+    if (attempts.some((attempt) => attempt.delivery_status !== "failed"))
+      return blocked("A follow-up is sending or may already have been sent. Check the Twilio message log; retry is unavailable to avoid sending twice.");
+    const contact = getContact(request.business_id, request.contact_id);
+    const business = getBusiness(request.business_id);
+    const original = db.prepare(
+      "SELECT to_phone FROM sms_messages WHERE business_id=? AND request_id=? AND kind='initial' LIMIT 1",
+    ).get(business.id, request.id);
+    if (!original || original.to_phone !== contact.phone)
+      return blocked("The customer phone number changed. This request cannot send another follow-up.");
+    if (isBlocked(business.id, contact)) return blocked("This customer has opted out of texts.");
+    if (!contact.sms_consent) return blocked("This customer has not agreed to receive review-request texts.");
+    if (!business.google_review_url) return blocked("Add this business Google review link before retrying.");
+    if (smsMode === "twilio" && !credentialsReady(business))
+      return blocked("Add this business Twilio settings before retrying.");
+    return { retry_allowed: true, retry_blocked_reason: null };
+  }
+
+  app.post("/api/businesses/:businessId/requests/:requestId/retry-nudge", async (req, res) => {
+    const claim = transaction(db, () => {
+      const business = getBusiness(req.params.businessId);
+      const request = getRequest(business.id, req.params.requestId);
+      const retry = nudgeRetryState(request);
+      if (!retry.retry_allowed) throw new AppError(409, retry.retry_blocked_reason);
+      const contact = getContact(business.id, request.contact_id);
+      db.prepare("UPDATE review_requests SET nudge_attempted_at=? WHERE business_id=? AND id=?")
+        .run(stamp(), business.id, request.id);
+      const message = reserveMessage(business, contact, "nudge", request.id);
+      log({ businessId: business.id, contactId: contact.id, requestId: request.id,
+        kind: "nudge_retry", label: "Owner retried the failed follow-up.", mode: smsMode });
+      return { business, request, message };
+    });
+    if (!await sendClaimedNudge(claim))
+      throw new AppError(502, getRequest(claim.business.id, claim.request.id).nudge_error);
+    res.json(getRequest(claim.business.id, claim.request.id));
+  });
+
+  async function sendClaimedNudge(claim) {
+    const { business, request, message } = claim;
+    let result;
+    try {
+      result = await deliver(business, message);
+    } catch (error) {
+      transaction(db, () => {
+        const failure = recordFailure(business, message, error, request.id);
+        db.prepare(
+          "UPDATE review_requests SET nudge_error=? WHERE business_id=? AND id=?",
+        ).run(failure.message, business.id, request.id);
+      });
+      return false;
+    }
+    transaction(db, () => {
+      db.prepare(
+        "UPDATE sms_messages SET delivery_status=?,provider_sid=?,updated_at=? WHERE business_id=? AND id=?",
+      ).run(
+        smsMode === "demo" ? "simulated" : "sent",
+        result?.sid || null,
+        stamp(),
+        business.id,
+        message.id,
+      );
+      const changed = db
+        .prepare(
+          "UPDATE review_requests SET status='nudged',nudged_at=?,nudge_error=NULL WHERE business_id=? AND id=? AND status='sent'",
+        )
+        .run(stamp(), business.id, request.id);
+      log({
+        businessId: business.id,
+        contactId: request.contact_id,
+        requestId: request.id,
+        kind: "sms_sent",
+        label:
+          smsMode === "demo"
+            ? "One follow-up simulated. No text was sent."
+            : "One follow-up accepted by Twilio.",
+        body: message.body,
+        mode: smsMode,
+      });
+      if (changed.changes)
+        log({
+          businessId: business.id,
+          contactId: request.contact_id,
+          requestId: request.id,
+          kind: "status_changed",
+          label: "Review request marked nudged. No more follow-ups.",
+          mode: smsMode,
+        });
+    });
+    return true;
+  }
 
   async function runNudges({ businessId } = {}) {
     const totals = { sent: 0, failed: 0, skipped: 0 };
@@ -954,59 +1067,10 @@ export function createApp({
         totals.skipped++;
         continue;
       }
-      const { business, request, message } = claim;
-      let result;
-      try {
-        result = await deliver(business, message);
-      } catch (error) {
-        transaction(db, () => {
-          const failure = recordFailure(business, message, error, request.id);
-          db.prepare(
-            "UPDATE review_requests SET nudge_error=? WHERE business_id=? AND id=?",
-          ).run(failure.message, business.id, request.id);
-        });
-        totals.failed++;
-        continue;
-      }
-      transaction(db, () => {
-        db.prepare(
-          "UPDATE sms_messages SET delivery_status=?,provider_sid=?,updated_at=? WHERE business_id=? AND id=?",
-        ).run(
-          smsMode === "demo" ? "simulated" : "sent",
-          result?.sid || null,
-          stamp(),
-          business.id,
-          message.id,
-        );
-        const changed = db
-          .prepare(
-            "UPDATE review_requests SET status='nudged',nudged_at=? WHERE business_id=? AND id=? AND status='sent'",
-          )
-          .run(stamp(), business.id, request.id);
-        log({
-          businessId: business.id,
-          contactId: request.contact_id,
-          requestId: request.id,
-          kind: "sms_sent",
-          label:
-            smsMode === "demo"
-              ? "One follow-up simulated. No text was sent."
-              : "One follow-up accepted by Twilio.",
-          body: message.body,
-          mode: smsMode,
-        });
-        if (changed.changes)
-          log({
-            businessId: business.id,
-            contactId: request.contact_id,
-            requestId: request.id,
-            kind: "status_changed",
-            label: "Review request marked nudged. No more follow-ups.",
-            mode: smsMode,
-          });
-      });
-      totals.sent++;
+      if (await sendClaimedNudge(claim)) totals.sent++;
+      else totals.failed++;
     }
+    workerLastCheckedAt = stamp();
     return totals;
   }
 

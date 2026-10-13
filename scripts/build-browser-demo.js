@@ -75,6 +75,7 @@ export function createBrowserDemo(storage) {
     return request;
   };
   const runNudges = (businessId = null) => {
+    data.worker_last_checked_at = now();
     let count = 0;
     for (const request of data.requests) {
       if (businessId && request.business_id !== businessId) continue;
@@ -135,6 +136,8 @@ export function createBrowserDemo(storage) {
       const r = requests().find((x) => x.id === parts[4]);
       if (!r) throw new Error("That request could not be found for this business.");
       result = done(b, r);
+    } else if (parts[3] === "requests" && parts[5] === "retry-nudge" && method === "POST") {
+      throw new Error("There are no failed follow-ups to retry in this browser demo.");
     } else if (parts[3] === "requests" && method === "POST") {
       const c = eligible(b, values.contact_id);
       result = parts[4] === "preview" ? { body: message(b, c), mode: "demo" } : send(b, c);
@@ -147,7 +150,7 @@ export function createBrowserDemo(storage) {
     } else if (parts[3] === "activity" && method === "GET") result = activity();
     else if (parts[3] === "dashboard" && method === "GET") {
       const all = requests(); const waiting = all.filter((r) => r.status === "sent" && !r.nudge_attempted_at);
-      result = { total_requests: all.length, awaiting_nudge: waiting.length, completed: all.filter((r) => r.status === "done").length, upcoming_nudges: waiting, recent_activity: activity().slice(0, 8) };
+      result = { total_requests: all.length, awaiting_nudge: waiting.length, completed: all.filter((r) => r.status === "done").length, upcoming_nudges: waiting, recent_activity: activity().slice(0, 8), attention_needed: [], worker_last_checked_at: data.worker_last_checked_at };
     } else throw new Error("That action is not available in the browser demo.");
     save(); return copy(result);
   };

@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { createAuthRateLimit } from "./rate-limits.js";
 
 const local = (host) => /^(localhost|127\.0\.0\.1|\[?::1\]?)$/i.test(host);
 
@@ -30,28 +31,31 @@ export function createAdminAccess(env = process.env) {
   if (!username.trim() || /[:\r\n]/.test(username)) throw new Error("ADMIN_USERNAME must be a nonempty name without colons or line breaks.");
   const expectedUser = digest(username);
   const expectedPassword = digest(password);
+  const authRateLimit = password ? createAuthRateLimit() : null;
   return {
     adminOrigin,
     webhookOrigin,
     middleware(req, res, next) {
       if (!password) return next();
       res.set("Cache-Control", "no-store");
-      const authorization = req.get("authorization") || "";
-      const encoded = /^Basic ([A-Za-z0-9+/]+={0,2})$/i.exec(authorization)?.[1];
-      let user = "", supplied = "";
-      if (encoded && encoded.length <= 4096) {
-        const value = Buffer.from(encoded, "base64").toString("utf8");
-        const separator = value.indexOf(":");
-        if (separator >= 0) {
-          user = value.slice(0, separator);
-          supplied = value.slice(separator + 1);
+      return authRateLimit(req, res, () => {
+        const authorization = req.get("authorization") || "";
+        const encoded = /^Basic ([A-Za-z0-9+/]+={0,2})$/i.exec(authorization)?.[1];
+        let user = "", supplied = "";
+        if (encoded && encoded.length <= 4096) {
+          const value = Buffer.from(encoded, "base64").toString("utf8");
+          const separator = value.indexOf(":");
+          if (separator >= 0) {
+            user = value.slice(0, separator);
+            supplied = value.slice(separator + 1);
+          }
         }
-      }
-      const userMatches = timingSafeEqual(digest(user), expectedUser);
-      const passwordMatches = timingSafeEqual(digest(supplied), expectedPassword);
-      if (userMatches && passwordMatches) return next();
-      res.set("WWW-Authenticate", 'Basic realm="Tradesuite admin", charset="UTF-8"');
-      return res.status(401).type("text/plain").send("Sign in with your Tradesuite admin name and password.");
+        const userMatches = timingSafeEqual(digest(user), expectedUser);
+        const passwordMatches = timingSafeEqual(digest(supplied), expectedPassword);
+        if (userMatches && passwordMatches) return next();
+        res.set("WWW-Authenticate", 'Basic realm="Tradesuite admin", charset="UTF-8"');
+        return res.status(401).type("text/plain").send("Sign in with your Tradesuite admin name and password.");
+      });
     },
   };
 }

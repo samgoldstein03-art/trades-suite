@@ -208,6 +208,14 @@ function requestTable(requests, limited = false) {
     );
   return `<table><thead><tr><th>Customer</th><th>Status</th><th>Requested</th><th>${limited ? "Next step" : "Follow-up"}</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${requests.map((r) => `<tr><td>${customerInfo(r)}${r.mode === "demo" ? '<small class="subtle">Demo request</small>' : ""}</td><td>${badge(r.status)}</td><td title="${escape(fullDate(r.sent_at))}">${date(r.sent_at)}</td><td>${r.status === "done" ? "All wrapped up" : r.status === "nudged" ? "No more follow-ups" : r.nudge_attempted_at ? "Follow-up attempted" : `One nudge ${date(r.nudge_due_at)}`}</td><td>${r.status !== "done" ? `<button class="text-button table-action" data-action="done" data-id="${escape(r.id)}">Mark done ${icon("check")}</button>` : '<span class="subtle">Completed</span>'}</td></tr>`).join("")}</tbody></table>`;
 }
+function attentionNeeded(requests) {
+  if (!requests.length) return "";
+  return `<section class="panel attention-panel" aria-labelledby="attention-heading"><div class="panel-heading"><div><h2 id="attention-heading">Attention needed</h2><p>These follow-ups need a hand.</p></div></div><div class="attention-list">${requests.map((r) => `<div class="attention-row"><div>${customerInfo(r)}<p class="attention-error">${escape(r.nudge_error || "The follow-up could not be sent.")}</p>${!r.retry_allowed ? `<p class="note">${escape(r.retry_blocked_reason || "Check the activity log before trying again.")}</p>` : ""}</div><button class="button secondary" data-action="retry-nudge" data-id="${escape(r.id)}" ${r.retry_allowed ? "" : "disabled"}>Retry nudge</button></div>`).join("")}</div></section>`;
+}
+function workerStatus() {
+  const checked = state.dashboard.worker_last_checked_at;
+  return `<p class="worker-status">${icon("clock")}<span>${checked ? `Follow-ups last checked at <time datetime="${escape(checked)}">${escape(fullDate(checked))}</time>.` : "Follow-ups have not been checked yet."}${state.config.browser_demo ? " Checks run while this page is open." : ""}</span></p>`;
+}
 function dashboardPage() {
   const d = state.dashboard;
   const awaiting = state.requests
@@ -220,7 +228,7 @@ function dashboardPage() {
     .sort((a, b) => new Date(a.nudge_due_at) - new Date(b.nudge_due_at));
   const upcoming = d.upcoming_nudges || awaiting;
   const recent = d.recent_activity || state.activity;
-  return `${heading("A little word of mouth.", "Here’s how things are looking for " + escape(state.business.name) + ".", `<div class="heading-actions"><button class="button secondary" data-action="add-contact">${icon("people")}Add customer</button>${requestButton()}</div>`)}<section class="hero"><div class="hero-copy"><div class="eyebrow">YOU DO GOOD WORK. LET IT SHOW.</div><h2>Happy customers.<br>Your next best advertisement.</h2><p>A friendly text. An honest review. A little more trust<br>from the next person who needs a hand.</p><button class="button lime" data-action="request">Ask for a review ${icon("arrow")}</button></div><div class="hero-art" aria-hidden="true"><div class="orbit"></div><div class="review-card"><div class="stars">★★★★★</div><b>Another job well done.</b><div class="review-lines"></div><div class="review-lines short"></div></div><span class="review-spark">✦</span></div></section><section class="stats-grid" aria-label="Your numbers"><div class="stat-card"><div class="stat-top">Review requests sent<span class="stat-icon">${icon("send")}</span></div><div class="stat-number">${d.total_requests ?? state.requests.length}</div><div class="stat-bottom">A little ask that goes a long way</div></div><div class="stat-card"><div class="stat-top">Waiting for a nudge<span class="stat-icon">${icon("clock")}</span></div><div class="stat-number">${d.awaiting_nudge ?? upcoming.length}</div><div class="stat-bottom"><span class="green">One gentle follow-up</span> · after 3 days</div></div><div class="stat-card"><div class="stat-top">Marked done<span class="stat-icon">${icon("star")}</span></div><div class="stat-number">${d.completed ?? state.requests.filter((x) => x.status === "done").length}</div><div class="stat-bottom">Closed out by you. Nice work.</div></div></section><div class="dashboard-grid"><section class="panel"><div class="panel-heading"><h2>The latest</h2><a href="#activity" class="text-button">All activity ${icon("arrow")}</a></div><div class="activity-list">${recent.length ? activityRows(recent.slice(0, 4)) : empty("A fresh start", "Your requests and updates will appear here.")}</div><div class="panel-bottom">${icon("activity")}Every request and update, all in one place.</div></section><div><section class="panel"><div class="panel-heading"><div><h2>A gentle follow-up</h2><p>We’ll take it from here.</p></div><span class="stat-icon">${icon("clock")}</span></div><div class="nudge-list">${
+  return `${heading("A little word of mouth.", "Here’s how things are looking for " + escape(state.business.name) + ".", `<div class="heading-actions"><button class="button secondary" data-action="add-contact">${icon("people")}Add customer</button>${requestButton()}</div>`)}<section class="hero"><div class="hero-copy"><div class="eyebrow">YOU DO GOOD WORK. LET IT SHOW.</div><h2>Happy customers.<br>Your next best advertisement.</h2><p>A friendly text. An honest review. A little more trust<br>from the next person who needs a hand.</p><button class="button lime" data-action="request">Ask for a review ${icon("arrow")}</button></div><div class="hero-art" aria-hidden="true"><div class="orbit"></div><div class="review-card"><div class="stars">★★★★★</div><b>Another job well done.</b><div class="review-lines"></div><div class="review-lines short"></div></div><span class="review-spark">✦</span></div></section><section class="stats-grid" aria-label="Your numbers"><div class="stat-card"><div class="stat-top">Review requests sent<span class="stat-icon">${icon("send")}</span></div><div class="stat-number">${d.total_requests ?? state.requests.length}</div><div class="stat-bottom">A little ask that goes a long way</div></div><div class="stat-card"><div class="stat-top">Waiting for a nudge<span class="stat-icon">${icon("clock")}</span></div><div class="stat-number">${d.awaiting_nudge ?? upcoming.length}</div><div class="stat-bottom"><span class="green">One gentle follow-up</span> · after 3 days</div></div><div class="stat-card"><div class="stat-top">Marked done<span class="stat-icon">${icon("star")}</span></div><div class="stat-number">${d.completed ?? state.requests.filter((x) => x.status === "done").length}</div><div class="stat-bottom">Closed out by you. Nice work.</div></div></section>${workerStatus()}${attentionNeeded(d.attention_needed || [])}<div class="dashboard-grid"><section class="panel"><div class="panel-heading"><h2>The latest</h2><a href="#activity" class="text-button">All activity ${icon("arrow")}</a></div><div class="activity-list">${recent.length ? activityRows(recent.slice(0, 4)) : empty("A fresh start", "Your requests and updates will appear here.")}</div><div class="panel-bottom">${icon("activity")}Every request and update, all in one place.</div></section><div><section class="panel"><div class="panel-heading"><div><h2>A gentle follow-up</h2><p>We’ll take it from here.</p></div><span class="stat-icon">${icon("clock")}</span></div><div class="nudge-list">${
     upcoming.length
       ? upcoming
           .slice(0, 3)
@@ -482,6 +490,43 @@ function doneModal(id) {
     "Marked done. Any pending reminder is stopped.",
   );
 }
+function retryNudgeModal(id) {
+  const request = (state.dashboard.attention_needed || []).find(
+    (r) => String(r.id) === String(id),
+  );
+  if (!request?.retry_allowed) return;
+  const context = base();
+  openModal(
+    "Try the follow-up again.",
+    "One gentle reminder, once it goes through.",
+    modalForm(
+      `${customerInfo(request)}<p class="note">The last follow-up could not be sent. Retry it for this customer? After a successful nudge, no more reminders will be sent.</p>${isDemo() ? '<p class="note"><strong>Demo mode:</strong> no real text will be sent.</p>' : ""}`,
+      "Retry nudge",
+    ),
+  );
+  $("#dialog-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    $("button[type=submit]", event.currentTarget).disabled = true;
+    let failure;
+    try {
+      await api(`${context}/requests/${encodeURIComponent(id)}/retry-nudge`, {
+        method: "POST",
+        body: "{}",
+      });
+    } catch (error) {
+      failure = error;
+    }
+    // Re-read retry eligibility even on rejection: an uncertain delivery must
+    // not leave an old confirmation open with an enabled send button.
+    $("#modal").close();
+    try {
+      await refresh();
+    } catch (error) {
+      failure ||= error;
+    }
+    toast(failure ? failure.message : "Follow-up nudge sent.", Boolean(failure));
+  });
+}
 function demoNudge() {
   const context = base();
   openModal(
@@ -522,6 +567,9 @@ document.addEventListener("click", async (e) => {
         break;
       case "done":
         doneModal(el.dataset.id);
+        break;
+      case "retry-nudge":
+        retryNudgeModal(el.dataset.id);
         break;
       case "demo-nudge":
         demoNudge();

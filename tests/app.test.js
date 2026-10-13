@@ -701,6 +701,136 @@ test("failed follow-ups stay unsent and are not automatically retried", async (t
   );
 });
 
+test("rejected nudges remain visible for their business and an owner can retry once accepted", async (t) => {
+  const f = await fixture(t, { sendSms: async (_message, count) => {
+    if (count === 2) throw Object.assign(new Error("private provider details"), { status: 400, code: 21211 });
+    return { sid: `SM${String(count).padStart(32, "0")}` };
+  } });
+  const alpha = await f.business();
+  const beta = await f.business("BETA");
+  const contact = await f.contact(alpha.id);
+  const sent = await f.send(alpha.id, contact.id);
+  const base = `/api/businesses/${alpha.id}`;
+  const dashboard = async () => (await f.request("GET", `${base}/dashboard`)).data;
+  assert.equal((await dashboard()).worker_last_checked_at, null);
+  f.advance(3 * DAY);
+  assert.equal((await f.runNudges()).failed, 1);
+  let view = await dashboard();
+  assert.equal(view.worker_last_checked_at, f.now().toISOString());
+  assert.equal(view.awaiting_nudge, 0);
+  assert.equal(view.attention_needed.length, 1);
+  assert.equal(view.attention_needed[0].id, sent.data.id);
+  assert.equal(view.attention_needed[0].retry_allowed, true);
+  assert.doesNotMatch(JSON.stringify(view), /private provider details/);
+  assert.deepEqual((await f.request("GET", `/api/businesses/${beta.id}/dashboard`)).data.attention_needed, []);
+  assert.equal((await f.request("POST", `/api/businesses/${beta.id}/requests/${sent.data.id}/retry-nudge`, {})).status, 404);
+  f.advance(DAY);
+  assert.equal((await f.runNudges()).sent, 0, "failed nudge still never retries automatically");
+  const retry = await f.request("POST", `${base}/requests/${sent.data.id}/retry-nudge`, {});
+  assert.equal(retry.status, 200);
+  assert.equal(retry.data.status, "nudged");
+  assert.equal(retry.data.nudge_error, null);
+  assert.equal(f.deliveries[2].accountSid, CREDENTIALS.ALPHA.accountSid);
+  assert.match(f.deliveries[2].body, /Alpha Heating\nReply STOP to opt out$/);
+  view = await dashboard();
+  assert.deepEqual(view.attention_needed, []);
+  assert.equal(view.total_requests, 1);
+  assert.equal((await f.request("POST", `${base}/requests/${sent.data.id}/retry-nudge`, {})).status, 409);
+  const activity = (await f.request("GET", `${base}/activity`)).data;
+  assert.equal(activity.filter((entry) => entry.kind === "nudge_retry").length, 1);
+  assert.equal(activity.filter((entry) => entry.kind === "sms_sent").length, 2);
+  assert.equal(f.deliveries.length, 3);
+});
+
+test("another rejected retry stays visible and an uncertain retry cannot be repeated", async (t) => {
+  const f = await fixture(t, { sendSms: async (_message, count) => {
+    if (count === 4) throw new Error("Connection closed after submitting");
+    if (count > 1) throw Object.assign(new Error("Rejected"), { status: 400, code: 21211 });
+    return { sid: `SM${"3".repeat(32)}` };
+  } });
+  const business = await f.business();
+  const contact = await f.contact(business.id);
+  const sent = await f.send(business.id, contact.id);
+  const base = `/api/businesses/${business.id}`;
+  const retry = () => f.request("POST", `${base}/requests/${sent.data.id}/retry-nudge`, {});
+  f.advance(3 * DAY);
+  await f.runNudges();
+  assert.equal((await retry()).status, 502);
+  let attention = (await f.request("GET", `${base}/dashboard`)).data.attention_needed;
+  assert.equal(attention.length, 1);
+  assert.equal(attention[0].retry_allowed, true);
+  assert.equal((await retry()).status, 502);
+  attention = (await f.request("GET", `${base}/dashboard`)).data.attention_needed;
+  assert.equal(attention.length, 1);
+  assert.equal(attention[0].retry_allowed, false);
+  assert.match(attention[0].retry_blocked_reason, /may already have been sent/);
+  assert.equal((await retry()).status, 409);
+  assert.equal((await f.runNudges()).sent, 0);
+  assert.equal(f.deliveries.length, 4);
+});
+
+test("parallel manual retries send once and marking done during retry stays done", async (t) => {
+  let finish;
+  let started;
+  const retryStarted = new Promise((resolve) => { started = resolve; });
+  const f = await fixture(t, { sendSms: async (_message, count) => {
+    if (count === 2) throw Object.assign(new Error("Rejected"), { status: 400, code: 21211 });
+    if (count === 3) { started(); return new Promise((resolve) => { finish = resolve; }); }
+    return { sid: `SM${"3".repeat(32)}` };
+  } });
+  const business = await f.business();
+  const contact = await f.contact(business.id);
+  const sent = await f.send(business.id, contact.id);
+  const base = `/api/businesses/${business.id}`;
+  const path = `${base}/requests/${sent.data.id}`;
+  f.advance(3 * DAY);
+  await f.runNudges();
+  const first = f.request("POST", `${path}/retry-nudge`, {});
+  await Promise.race([retryStarted, first.then(() => { throw new Error("Retry returned without sending"); })]);
+  try {
+    assert.equal((await f.request("POST", `${path}/retry-nudge`, {})).status, 409);
+    const attention = (await f.request("GET", `${base}/dashboard`)).data.attention_needed;
+    assert.equal(attention.length, 1, "in-flight retry does not hide the original failure");
+    assert.equal(attention[0].retry_allowed, false);
+    assert.equal((await f.runNudges()).sent, 0);
+    assert.equal((await f.request("POST", `${path}/done`, {})).status, 200);
+  } finally {
+    finish({ sid: `SM${"4".repeat(32)}` });
+    const response = await first;
+    assert.equal(response.status, 200);
+    assert.equal(response.data.status, "done");
+  }
+  assert.equal(f.deliveries.length, 3);
+  assert.deepEqual((await f.request("GET", `${base}/dashboard`)).data.attention_needed, []);
+});
+
+test("manual retry rechecks phone, consent, opt-out, credentials and request mode", async (t) => {
+  for (const change of ["phone", "consent", "opt-out", "credentials", "mode", "done"]) {
+    await t.test(change, async (t) => {
+      const f = await fixture(t, { sendSms: async (_message, count) => {
+        if (count > 1) throw Object.assign(new Error("Rejected"), { status: 400, code: 21211 });
+        return { sid: `SM${"3".repeat(32)}` };
+      } });
+      const business = await f.business();
+      const contact = await f.contact(business.id);
+      const sent = await f.send(business.id, contact.id);
+      const base = `/api/businesses/${business.id}`;
+      f.advance(3 * DAY);
+      await f.runNudges();
+      if (change === "phone") {
+        await f.request("PATCH", `${base}/contacts/${contact.id}`, { phone: "+14165550999" });
+        await f.request("PATCH", `${base}/contacts/${contact.id}`, { sms_consent: true });
+      } else if (change === "consent") await f.request("PATCH", `${base}/contacts/${contact.id}`, { sms_consent: false });
+      else if (change === "opt-out") await f.request("PATCH", `${base}/contacts/${contact.id}`, { opted_out: true });
+      else if (change === "credentials") f.setEnv("BUSINESS_ALPHA_AUTH_TOKEN", undefined);
+      else if (change === "mode") f.db.prepare("UPDATE review_requests SET mode='demo' WHERE id=?").run(sent.data.id);
+      else await f.request("POST", `${base}/requests/${sent.data.id}/done`, {});
+      assert.equal((await f.request("POST", `${base}/requests/${sent.data.id}/retry-nudge`, {})).status, 409);
+      assert.equal(f.deliveries.length, 2);
+    });
+  }
+});
+
 test("invalid phone numbers, URLs, tags, and missing consent are rejected before sending", async (t) => {
   const f = await fixture(t);
   const business = await f.business();

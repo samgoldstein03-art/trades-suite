@@ -19,6 +19,7 @@
   "dependencies": {
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "express-rate-limit": "8.7.1",
     "multer": "^2.0.2",
     "twilio": "^5.10.3"
   }
