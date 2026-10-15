@@ -296,7 +296,7 @@ The browser demo can be rebuilt and published independently of the backend:
 
 ```powershell
 npm run build:browser-demo
-powershell -NoProfile -File scripts/publish-browser-demo.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-browser-demo.ps1
 ```
 
 The publishing script uploads only the generated sample demo and font licenses

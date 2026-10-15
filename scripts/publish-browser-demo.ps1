@@ -11,7 +11,7 @@ $taskHeaders = @{ 'X-HereNow-Client' = 'codex/direct-api' }
 $taskManifest = foreach ($taskFile in $taskFiles) {
   @{ path = $taskFile.path; size = (Get-Item -LiteralPath $taskFile.local).Length; contentType = $taskFile.contentType; hash = (Get-FileHash -LiteralPath $taskFile.local -Algorithm SHA256).Hash.ToLowerInvariant() }
 }
-$taskPayload = @{ files = @($taskManifest); displayName = 'Tradesuite demo'; displayDescription = 'Sample-only interactive trades business dashboard. Texts are simulated; changes stay in the browser.' }
+$taskPayload = @{ files = @($taskManifest); displayName = 'Tradesuite demo'; displayDescription = 'Sample-only interactive trades business dashboard. Texts and emails are simulated; changes stay in the browser.' }
 if (Test-Path -LiteralPath $taskStatePath) {
   $taskPrevious = Get-Content -LiteralPath $taskStatePath -Raw | ConvertFrom-Json
   $taskPayload.claimToken = $taskPrevious.claimToken
@@ -28,7 +28,7 @@ foreach ($taskUpload in $taskPublish.upload.uploads) {
   if (-not $taskFile) { throw 'Unexpected upload file requested.' }
   $taskUploadUri = [Uri]$taskUpload.url
   if ($taskUploadUri.Scheme -ne 'https' -or -not $taskUploadUri.Host.EndsWith('.r2.cloudflarestorage.com')) { throw 'Unexpected upload storage host.' }
-  $null = Invoke-WebRequest -Uri $taskUploadUri -Method Put -ContentType $taskFile.contentType -InFile $taskFile.local -TimeoutSec 60
+  $null = Invoke-WebRequest -UseBasicParsing -Uri $taskUploadUri -Method Put -ContentType $taskFile.contentType -InFile $taskFile.local -TimeoutSec 60
 }
 $taskFinalizeUri = [Uri]$taskPublish.upload.finalizeUrl
 if ($taskFinalizeUri.Scheme -ne 'https' -or $taskFinalizeUri.Host -ne 'here.now') { throw 'Unexpected finalize host.' }
@@ -36,7 +36,7 @@ $taskFinal = Invoke-RestMethod -Uri $taskFinalizeUri -Method Post -Headers $task
 if (-not $taskFinal.success -or $taskFinal.publishStatus.state -ne 'live') { throw 'The host did not confirm a live deployment.' }
 $taskSiteUri = [Uri]$taskFinal.siteUrl
 if ($taskSiteUri.Scheme -ne 'https' -or -not $taskSiteUri.Host.EndsWith('.here.now')) { throw 'Unexpected site host.' }
-$taskCheck = Invoke-WebRequest -Uri $taskSiteUri -TimeoutSec 30
+$taskCheck = Invoke-WebRequest -UseBasicParsing -Uri $taskSiteUri -TimeoutSec 30
 if ($taskCheck.StatusCode -ne 200 -or $taskCheck.Content -notmatch 'Browser demo') { throw 'Public page verification did not pass.' }
 $taskReceipt = [ordered]@{ siteUrl=$taskFinal.siteUrl; claimUrl=$taskPublish.claimUrl; expiresAt=$taskFinal.publishStatus.expiresAt; state=$taskFinal.publishStatus.state; verifiedHttpStatus=$taskCheck.StatusCode; verifiedAt=(Get-Date).ToUniversalTime().ToString('o') }
 $taskReceipt | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot '.publish/free-demo-receipt.json') -Encoding utf8
