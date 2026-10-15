@@ -1,0 +1,66 @@
+:root { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #243d34; background: #f4f6f1; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 42px 20px 24px; }
+button, a { -webkit-tap-highlight-color: transparent; }
+button { font: inherit; cursor: pointer; }
+button:disabled { opacity: .6; cursor: wait; }
+button:focus-visible, a:focus-visible { outline: 3px solid #9fbc79; outline-offset: 4px; }
+a { color: #184c3f; text-underline-offset: 3px; }
+#customer-quote { max-width: 700px; margin: 0 auto; }
+.customer-quote-card { background: white; border: 1px solid #e0e7dc; border-radius: 20px; box-shadow: 0 14px 60px #243d3408; overflow: hidden; }
+.customer-business { display: flex; align-items: center; gap: 15px; padding: 28px 38px; border-bottom: 1px solid #e5e9e2; }
+.customer-business img { width: 52px; height: 52px; object-fit: contain; }
+.customer-business strong { font-size: 18px; overflow-wrap: anywhere; }
+.customer-business span:not(.quote-business-mark) { display: block; margin-top: 7px; font-size: 10px; font-weight: 650; letter-spacing: 2px; color: #758271; }
+.quote-business-mark { display: grid; place-items: center; width: 45px; height: 45px; flex-shrink: 0; border-radius: 13px; color: #e2efc9; background: #184c3f; font-size: 29px; }
+.quote-intro { padding: 30px 38px 25px; background: linear-gradient(120deg, #f5f8ed, #fff); }
+.quote-reference { font-size: 11px; font-weight: 650; letter-spacing: 1px; color: #6c7d63; }
+h1 { font-size: 36px; font-weight: 700; letter-spacing: -1.6px; line-height: 1.16; margin: 19px 0; }
+.quote-intro p { font-size: 14px; }
+.quote-intro .quote-validity { margin-bottom: 0; color: #737f70; font-size: 12px; }
+.customer-line-items { padding: 10px 38px 0; }
+.customer-line-item { display: flex; justify-content: space-between; gap: 24px; padding: 21px 0; border-bottom: 1px solid #e5e9e2; }
+.customer-line-item > div { min-width: 0; }
+.customer-line-item h2 { font-size: 14px; font-weight: 650; line-height: 1.5; overflow-wrap: anywhere; margin: 0; }
+.customer-line-item p { font-size: 12px; color: #788273; margin: 6px 0 0; }
+.customer-line-item > strong { white-space: nowrap; padding-top: 3px; font-size: 14px; }
+.customer-totals { width: 320px; max-width: 100%; margin: 15px 0 25px auto; padding-right: 38px; font-size: 13px; }
+.customer-totals > div { display: flex; justify-content: space-between; gap: 20px; padding: 9px 0; }
+.customer-totals .customer-total { border-top: 1px solid #e5e9e2; font-size: 23px; margin-top: 10px; padding-top: 15px; }
+.customer-total small { font-size: 10px; color: #778273; }
+.customer-notes { margin: 0 38px 28px; padding: 18px; background: #f7f8f4; border-radius: 12px; }
+.customer-notes h2 { margin: 0 0 8px; font-size: 12px; }
+.customer-notes p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.65; margin: 0; }
+.customer-decision { padding: 27px 38px 30px; border-top: 1px solid #e5e9e2; }
+.customer-decision h2 { margin: 0 0 8px; font-size: 22px; letter-spacing: -.6px; }
+.customer-decision p { font-size: 13px; line-height: 1.6; color: #6c7866; margin: 0; }
+.customer-decision-buttons { display: flex; gap: 12px; margin-top: 22px; }
+.customer-decision-buttons button { min-height: 48px; border-radius: 9px; border: 1px solid #184c3f; background: #184c3f; color: #fff; padding: 13px 25px; font-size: 14px; font-weight: 650; }
+.customer-decision-buttons .secondary { background: white; border-color: #dce3d7; color: #536149; }
+.customer-decision.accepted { background: #eef6e5; }
+.customer-decision.expired, .customer-decision.declined { background: #faf4ee; }
+.customer-contact { text-align: center; padding: 23px; border-top: 1px solid #e5e9e2; font-size: 12px; }
+.customer-contact > span { color: #778273; }
+.customer-contact > div { display: flex; justify-content: center; flex-wrap: wrap; gap: 24px; margin-top: 10px; }
+.quote-footer { font-size: 11px; color: #899181; text-align: center; margin: 24px 0 0; }
+.quote-loading { text-align: center; padding: 80px 10px; color: #697962; }
+.quote-unavailable { padding: 30px; }
+.quote-unavailable h1 { font-size: 27px; }
+.quote-unavailable p { line-height: 1.7; font-size: 14px; }
+#quote-response-error:not(:empty) { padding: 12px; margin-top: 16px; border-radius: 8px; background: #fcece4; color: #92482f; font-size: 13px; line-height: 1.6; }
+.quote-demo-notice { background: #e6efd6; padding: 11px 16px; text-align: center; border-radius: 12px; color: #52673e; font-size: 12px; margin-bottom: 16px; }
+@media (max-width: 540px) {
+  body { padding: 16px 12px 24px; }
+  .customer-business { padding: 22px; }
+  .customer-business strong { font-size: 16px; }
+  .quote-intro { padding: 24px 22px; }
+  h1 { font-size: 31px; }
+  .customer-line-items { padding: 3px 22px 0; }
+  .customer-line-item { gap: 18px; }
+  .customer-line-item h2, .customer-line-item > strong { font-size: 13px; }
+  .customer-totals { padding-right: 22px; padding-left: 22px; }
+  .customer-notes { margin-left: 22px; margin-right: 22px; }
+  .customer-decision { padding: 24px 22px; }
+  .customer-decision-buttons button { flex: 1; padding: 14px 16px; }
+  .customer-decision h2 { font-size: 21px; }
+}

@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createBrowserQuotes } from "./browser-quotes.js";
 
 // This adapter is only bundled into the standalone sample. The installed app
 // continues to use Express, SQLite and the per-business Twilio transport.
@@ -19,6 +20,7 @@ export function createBrowserDemo(storage) {
   const log = (business, contact, kind, label, body = "", created_at = now()) => {
     data.activity.unshift({ id: id(), business_id: business.id, contact_id: contact?.id || null, contact_name: contact?.name || "", kind, label, body, mode: "demo", created_at });
   };
+  const quotes = createBrowserQuotes({ getData: () => data, id, now, log });
   const phone = (value) => {
     const normalized = String(value || "").replace(/[\s()\-]/g, "");
     if (!/^\+[1-9]\d{7,14}$/.test(normalized)) throw new Error("Enter a phone number with a country code, such as +14165550123.");
@@ -99,7 +101,12 @@ export function createBrowserDemo(storage) {
     addBusiness({ name: "Summit Electric", phone: "+14165550201", booking_url: "https://example.com/summit/book", google_review_url: "https://g.page/r/demo-summit/review", sms_key: "SUMMIT" }); save();
   }
   return async function browserDemoApi(path, options = {}) {
+    // Another tab may have accepted a quote. Read its saved response before
+    // refreshing the owner's dashboard or sending the next demo reminder.
+    try { const saved = JSON.parse(storage.getItem(key)); if (saved?.businesses && saved?.contacts && saved?.requests && saved?.activity) data = saved; } catch {}
     runNudges();
+    quotes.run();
+    save();
     const method = options.method || "GET";
     const values = typeof options.body === "string" ? JSON.parse(options.body) : options.body || {};
     if (path === "/api/config") return { sms_mode: "demo", browser_demo: true, public_demo: true, nudge_after_hours: 72 };
@@ -107,7 +114,9 @@ export function createBrowserDemo(storage) {
       if (method === "GET") return copy(data.businesses);
       if (method === "POST") { const result = addBusiness(values); save(); return copy(result); }
     }
-    const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
+    const parsedPath = new URL(path, "https://demo.example.test");
+    const parts = parsedPath.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+    if (parts[0] === "q") { const result = quotes.publicRoute(parts, method, values); save(); return copy(result); }
     if (parts[0] !== "api" || parts[1] !== "businesses") throw new Error("That page is not available in the browser demo.");
     const b = data.businesses.find((x) => x.id === parts[2]);
     if (!b) throw new Error("That business could not be found.");
@@ -115,7 +124,8 @@ export function createBrowserDemo(storage) {
     const contacts = () => data.contacts.filter((c) => c.business_id === b.id);
     const requests = () => data.requests.filter((r) => r.business_id === b.id);
     const activity = () => data.activity.filter((a) => a.business_id === b.id).sort((a, c) => new Date(c.created_at) - new Date(a.created_at));
-    if (parts.length === 3 && method === "PATCH") {
+    if (parts[3] === "quotes") result = quotes.adminRoute(b, parts, method, values, parsedPath.searchParams);
+    else if (parts.length === 3 && method === "PATCH") {
       result = Object.assign(b, businessValues(values, b));
       log(b, null, "business_updated", "Business details updated.");
     }
@@ -150,7 +160,7 @@ export function createBrowserDemo(storage) {
     } else if (parts[3] === "activity" && method === "GET") result = activity();
     else if (parts[3] === "dashboard" && method === "GET") {
       const all = requests(); const waiting = all.filter((r) => r.status === "sent" && !r.nudge_attempted_at);
-      result = { total_requests: all.length, awaiting_nudge: waiting.length, completed: all.filter((r) => r.status === "done").length, upcoming_nudges: waiting, recent_activity: activity().slice(0, 8), attention_needed: [], worker_last_checked_at: data.worker_last_checked_at };
+      result = { total_requests: all.length, awaiting_nudge: waiting.length, completed: all.filter((r) => r.status === "done").length, upcoming_nudges: waiting, recent_activity: activity().slice(0, 8), attention_needed: [], worker_last_checked_at: data.worker_last_checked_at, quotes_awaiting_response: quotes.dashboard(b.id) };
     } else throw new Error("That action is not available in the browser demo.");
     save(); return copy(result);
   };
@@ -161,15 +171,23 @@ export function buildBrowserDemo(output) {
   let html = readFileSync(resolve(root, "public/index.html"), "utf8");
   let css = readFileSync(resolve(root, "public/styles.css"), "utf8").replace('@import url("/fonts.css");', "");
   const fonts = readFileSync(resolve(root, "public/fonts.css"), "utf8").replace(/url\(\/fonts\/([^)]+)\)/g, (_, file) => `url(data:font/ttf;base64,${readFileSync(resolve(root, "public/fonts", file)).toString("base64")})`);
+  const quoteRenderer = readFileSync(resolve(root, "public/quote.js"), "utf8").split("async function quotePublicRequest")[0];
+  // Keep the customer's standalone stylesheet from changing the admin screens.
+  const quoteCss = readFileSync(resolve(root, "public/quote.css"), "utf8").split("\n").map((line) => {
+    const match = line.match(/^(\s*)([^@{}][^{]*)\{(.*)$/);
+    if (!match) return line;
+    const selectors = match[2].split(",").map((selector) => [":root", "body"].includes(selector.trim()) ? ".browser-customer-quote" : `.browser-customer-quote ${selector.trim()}`).join(", ");
+    return `${match[1]}${selectors} {${match[3].replace("margin: 0; padding: 42px", "margin: 0 auto; padding: 42px")}`;
+  }).join("\n");
   let app = readFileSync(resolve(root, "public/app.js"), "utf8");
   app = app.replace(/async function api\(path, options = \{\}\) \{[\s\S]*?\n\}\nfunction toast/, "async function api(path, options = {}) { return browserDemoApi(path, options); }\nfunction toast");
   if (/await fetch\(/.test(app)) throw new Error("Frontend network API was not replaced.");
   app = app.replaceAll("localStorage.", "browserStorage.");
   app = app.replace("Public demo · Use sample details only. Anyone with this link can see changes. No real texts are sent.", "Browser demo · Sample data only. No real texts are sent. Changes stay in this browser. Automatic follow-ups run while this file is open.");
   const boot = `const browserStorage = (() => { const memory = new Map(); return { getItem(key) { try { return localStorage.getItem(key) ?? memory.get(key) ?? null; } catch { return memory.get(key) ?? null; } }, setItem(key, value) { memory.set(key, String(value)); try { localStorage.setItem(key, String(value)); } catch {} } }; })();\nconst browserDemoApi = (${createBrowserDemo.toString()})(browserStorage);\n`;
-  html = html.replace('<link rel="stylesheet" href="/styles.css" />', `<style>${fonts}\n${css}</style>`).replace('<script type="module" src="/app.js"></script>', "");
+  html = html.replace('<link rel="stylesheet" href="/styles.css" />', `<style>${fonts}\n${css}\n${quoteCss}</style>`).replace('<script type="module" src="/app.js"></script>', "");
   html = html.replace("<title>Tradesuite — Good work travels</title>", '<title>Tradesuite — Browser demo</title>\n<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data:; font-src data:; connect-src \'none\'; form-action \'none\'; base-uri \'none\'">');
-  html = html.replace("</body>", `<script>${(boot + app).replace(/<\/script/gi, "<\\/script")}</script>\n</body>`);
+  html = html.replace("</body>", `<script>${(`const createBrowserQuotes = ${createBrowserQuotes.toString()};\n` + boot + quoteRenderer + app).replace(/<\/script/gi, "<\\/script")}</script>\n</body>`);
   const target = output ? resolve(output) : resolve(root, "Tradesuite Demo.html");
   mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, html);
   return target;

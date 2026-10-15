@@ -27,6 +27,7 @@ const paths = {
   send: "m22 2-7 20-4-9L2 9z M22 2 11 13",
   shield: "M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7z M8 12l3 3 5-6",
   edit: "m15 4 5 5 M4 20l5-1L21 7a3.5 3.5 0 0 0-5-5L4 14z",
+  quote: "M6 3h12v18H6z M9 7h6 M9 11h6 M9 15h3",
 };
 const icon = (name) =>
   `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name] || paths.message}"/></svg>`;
@@ -34,6 +35,7 @@ const nav = [
   ["dashboard", "Overview", "grid"],
   ["contacts", "Customers", "people"],
   ["requests", "Review requests", "message"],
+  ["quotes", "Quotes", "quote"],
   ["activity", "Activity", "activity"],
   ["settings", "Business settings", "settings"],
 ];
@@ -43,6 +45,7 @@ let state = {
   business: null,
   contacts: [],
   requests: [],
+  quotes: [],
   activity: [],
   dashboard: {},
   page: "dashboard",
@@ -82,7 +85,7 @@ const ago = (value) => {
 const isDemo = () => state.config.sms_mode === "demo";
 const base = () => `/api/businesses/${encodeURIComponent(state.business.id)}`;
 const badge = (status) =>
-  `<span class="badge ${escape(status)}">${{ sent: "Sent", nudged: "Nudged", done: "Done", lead: "Lead", customer: "Customer", "opted-out": "Opted out" }[status] || escape(status)}</span>`;
+  `<span class="badge ${escape(status)}">${{ sent: "Sent", nudged: "Nudged", done: "Done", lead: "Lead", customer: "Customer", "opted-out": "Opted out", draft: "Draft", viewed: "Viewed", accepted: "Accepted", declined: "Declined", expired: "Expired" }[status] || escape(status)}</span>`;
 async function api(path, options = {}) {
   const res = await fetch(path, {
     ...options,
@@ -143,19 +146,26 @@ async function refresh() {
     null;
   if (state.business) {
     localStorage.setItem("tradesuite-business", state.business.id);
-    const [contacts, requests, activity, dashboard] = await Promise.all([
+    const [contacts, requests, activity, dashboard, quotes] = await Promise.all([
       api(`${base()}/contacts`),
       api(`${base()}/requests`),
       api(`${base()}/activity`),
       api(`${base()}/dashboard`),
+      api(`${base()}/quotes`),
     ]);
     if (run !== generation) return;
-    Object.assign(state, { contacts, requests, activity, dashboard });
+    Object.assign(state, { contacts, requests, activity, dashboard, quotes });
   }
   render();
 }
 function render() {
   state.page = location.hash.slice(1) || "dashboard";
+  const customerRoute = state.config.browser_demo && /^quote\/([A-Za-z0-9_-]+)$/.exec(state.page);
+  document.body.classList.toggle("customer-quote-view", Boolean(customerRoute));
+  if (customerRoute) {
+    renderBrowserCustomerQuote(customerRoute[1]);
+    return;
+  }
   if (!nav.some((x) => x[0] === state.page)) state.page = "dashboard";
   $("#main-nav").innerHTML = nav
     .map(
@@ -183,11 +193,13 @@ function render() {
     dashboard: dashboardPage,
     contacts: contactsPage,
     requests: requestsPage,
+    quotes: quotesPage,
     activity: activityPage,
     settings: settingsPage,
   }[state.page]();
   if (state.page === "settings") bindSettings();
   if (state.page === "contacts" || state.page === "requests") bindFilters();
+  if (state.page === "quotes") bindQuoteFilters();
 }
 function activityRows(items, full = false) {
   return items
@@ -238,7 +250,7 @@ function dashboardPage() {
           )
           .join("")
       : empty("All caught up", "No follow-ups waiting right now.")
-  }</div><div class="panel-bottom">${icon("shield")}Just one reminder. Never a string of texts.</div></section><div class="quick-tip">${icon("bulb")}<div><strong>The best time to ask?</strong><p>Right after a job well done. A warm thank-you and a quick link make it easy to leave a review.</p></div></div></div></div><div class="panel-heading" style="padding:28px 0 14px"><h2>Recent review requests</h2><a href="#requests" class="text-button">View all ${icon("arrow")}</a></div><section class="panel table-panel">${requestTable(state.requests.slice(0, 4), true)}</section>${demoBanner()}`;
+  }</div><div class="panel-bottom">${icon("shield")}Just one reminder. Never a string of texts.</div></section><div class="quick-tip">${icon("bulb")}<div><strong>The best time to ask?</strong><p>Right after a job well done. A warm thank-you and a quick link make it easy to leave a review.</p></div></div></div></div><div class="panel-heading" style="padding:28px 0 14px"><h2>Recent review requests</h2><a href="#requests" class="text-button">View all ${icon("arrow")}</a></div><section class="panel table-panel">${requestTable(state.requests.slice(0, 4), true)}</section>${quotesAwaitingResponse()}${demoBanner()}`;
 }
 function demoBanner() {
   return isDemo()
@@ -260,8 +272,85 @@ function contactsTable(contacts) {
 function requestsPage() {
   return `${heading("A good word goes a long way.", "Send a review request, then let us handle one friendly reminder.", requestButton())}<div class="toolbar"><div class="search-field">${icon("search")}<input id="search" placeholder="Find a request…" aria-label="Find a request"></div><select id="filter" class="filter-select" aria-label="Filter requests"><option value="all">All requests</option><option value="sent">Sent</option><option value="nudged">Nudged</option><option value="done">Done</option></select></div><section class="panel table-panel" id="results">${requestTable(state.requests)}</section><p class="note">Seen a customer’s review? Mark their request done to stop the follow-up. “Sent” means accepted for sending; it doesn’t confirm phone delivery. Reviews aren’t checked automatically.</p>${demoBanner()}`;
 }
+const quoteStatuses = ["draft", "sent", "viewed", "accepted", "declined", "expired"];
+const money = (cents, currency = "CAD") => new Intl.NumberFormat("en-CA", { style: "currency", currency }).format((Number(cents) || 0) / 100);
+const quoteDate = (value) => value ? new Date(`${value}T12:00:00`).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
+function quoteFollowUpText(q) {
+  if (["accepted", "declined", "expired"].includes(q.status)) return "No more reminders";
+  if (q.follow_ups_cancelled_at) return "Reminders stopped";
+  if (q.status === "draft") return "Starts after sending";
+  if (q.nudge_count >= 2) return "Both reminders sent";
+  return q.nudge_count === 1 ? "Final reminder at day 5" : "Reminders at day 2 and day 5";
+}
+function quotesTable(quotes, dashboard = false) {
+  if (!quotes.length) return empty(dashboard ? "No quotes waiting" : "Your next job starts with a quote", dashboard ? "Unanswered quotes appear here after you send them." : "Put the work and price in writing, then make it easy to say yes.", '<button class="button secondary" data-action="add-quote">Create quote</button>');
+  return `<table><thead><tr><th>Customer</th><th>Status</th><th>Total</th><th>Valid through</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${quotes.map((q) => `<tr><td><strong>${escape(q.contact_name)}</strong><small class="quote-reference">${escape(q.reference || "Quote")} · ${escape(quoteFollowUpText(q))}</small></td><td>${badge(q.status)}</td><td class="quote-amount">${escape(money(q.total_cents, q.currency))}</td><td>${escape(quoteDate(q.expiry_date))}</td><td><button class="text-button table-action" data-action="view-quote" data-id="${escape(q.id)}">${q.status === "draft" ? "Open draft" : "View quote"} ${icon("arrow")}</button></td></tr>`).join("")}</tbody></table>`;
+}
+function quotesAwaitingResponse() {
+  const quotes = state.dashboard.quotes_awaiting_response || (state.quotes || []).filter((q) => ["sent", "viewed"].includes(q.status));
+  return `<div class="panel-heading quote-dashboard-heading"><div><h2>Quotes awaiting response</h2><p>${quotes.length ? `${quotes.length} ${quotes.length === 1 ? "quote" : "quotes"} with your customers.` : "Keep the next job moving."}</p></div><a href="#quotes" class="text-button">All quotes ${icon("arrow")}</a></div><section class="panel table-panel">${quotesTable(quotes.slice(0, 5), true)}</section>`;
+}
+function quotesPage() {
+  return `${heading("Good work starts here.", "Clear quotes. A simple yes or no. Two gentle reminders.", '<button class="button" data-action="add-quote">' + icon("plus") + "Create quote</button>")}<div class="toolbar"><div class="search-field">${icon("search")}<input id="quote-search" placeholder="Find a quote…" aria-label="Find a quote"></div><select id="quote-filter" class="filter-select" aria-label="Filter quotes"><option value="all">All quotes</option>${quoteStatuses.map((s) => `<option value="${s}">${s[0].toUpperCase() + s.slice(1)}</option>`).join("")}</select></div><section class="panel table-panel" id="quote-results">${quotesTable(state.quotes || [])}</section><p class="note">Customers can accept or decline from their quote link. Unanswered quotes receive a text after 2 days and again after 5 days, with permission. You can stop reminders at any time.</p>${isDemo() ? '<div class="demo-banner"><span><strong>A practice quote, from start to finish.</strong> Texts and emails are simulated. Open a sent quote to test its reminders.</span></div>' : ""}`;
+}
+function bindQuoteFilters() {
+  const update = () => {
+    const query = $("#quote-search").value.toLowerCase();
+    const status = $("#quote-filter").value;
+    $("#quote-results").innerHTML = quotesTable((state.quotes || []).filter((q) => `${q.contact_name} ${q.reference}`.toLowerCase().includes(query) && (status === "all" || q.status === status)));
+  };
+  $("#quote-search").addEventListener("input", update);
+  $("#quote-filter").addEventListener("change", update);
+}
+function quoteTotals(items, taxRate) {
+  const scaled = (value, scale) => BigInt(Math.round((Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0) * scale));
+  const subtotal = items.reduce((sum, item) => sum + (scaled(item.quantity, 1000) * scaled(item.unit_price, 100) + 500n) / 1000n, 0n);
+  const subtotal_cents = Number(subtotal);
+  const tax_cents = Number((subtotal * scaled(taxRate, 1000) + 50000n) / 100000n);
+  return { subtotal_cents, tax_cents, total_cents: subtotal_cents + tax_cents };
+}
+function quoteTotalsMarkup(q) {
+  return `<div class="quote-totals"><div><span>Subtotal</span><strong>${escape(money(q.subtotal_cents, q.currency))}</strong></div><div><span>Tax (${escape(q.tax_rate || 0)}%)</span><strong>${escape(money(q.tax_cents, q.currency))}</strong></div><div class="quote-total"><span>Total <small>${escape(q.currency || "CAD")}</small></span><strong>${escape(money(q.total_cents, q.currency))}</strong></div></div>`;
+}
 function activityPage() {
-  return `${heading("Nothing falls through the cracks.", "Every text and every update for " + escape(state.business.name) + ".")}<section class="panel activity-full">${state.activity.length ? activityRows(state.activity, true) : empty("Your story starts here", "Send your first request and we’ll keep a record of it.")}</section>`;
+  return `${heading("Nothing falls through the cracks.", "Every message and every update for " + escape(state.business.name) + ".")}<section class="panel activity-full">${state.activity.length ? activityRows(state.activity, true) : empty("Your story starts here", "Send your first request and we’ll keep a record of it.")}</section>`;
+}
+let browserCustomerQuote;
+let browserCustomerQuoteSending = false;
+let browserQuoteGeneration = 0;
+function browserQuotePageMarkup(quote, error = "") {
+  return `<div class="browser-customer-quote"><a class="browser-quote-back" href="#quotes">← Back to workspace</a><p class="browser-quote-explanation">Practice quote · Saved in this browser only. No real texts or emails are sent.</p>${quotePublicMarkup(quote)}${error ? `<div class="browser-quote-error" role="alert">${escape(error)}</div>` : ""}</div>`;
+}
+async function renderBrowserCustomerQuote(token) {
+  const run = ++browserQuoteGeneration;
+  $("#main").innerHTML = '<div class="loading">Opening your quote…</div>';
+  try {
+    const quote = await api(`/q/${encodeURIComponent(token)}/data`);
+    if (run !== browserQuoteGeneration || location.hash !== `#quote/${token}`) return;
+    browserCustomerQuote = { token, quote };
+    $("#main").innerHTML = browserQuotePageMarkup(quote);
+  } catch (error) {
+    if (run !== browserQuoteGeneration || location.hash !== `#quote/${token}`) return;
+    browserCustomerQuote = null;
+    $("#main").innerHTML = `<div class="browser-customer-quote"><a class="browser-quote-back" href="#quotes">← Back to workspace</a><section class="panel form-panel"><h1>This quote couldn’t be opened.</h1><p>${escape(error.message)}</p><p>Browser demo quote links work only in the browser where the quote was created.</p></section></div>`;
+  }
+}
+async function respondBrowserCustomerQuote(decision) {
+  const current = browserCustomerQuote;
+  if (!current || !current.quote.can_respond || browserCustomerQuoteSending || !["accepted", "declined"].includes(decision)) return;
+  browserCustomerQuoteSending = true;
+  document.querySelectorAll("[data-decision]").forEach((button) => button.disabled = true);
+  let quote = current.quote;
+  let failure;
+  try {
+    quote = await api(`/q/${encodeURIComponent(current.token)}/respond`, { method: "POST", body: JSON.stringify({ decision }) });
+  } catch (error) {
+    failure = error;
+    try { quote = await api(`/q/${encodeURIComponent(current.token)}/data`); } catch { /* Show the send error and preserve the current quote. */ }
+  } finally { browserCustomerQuoteSending = false; }
+  if (location.hash !== `#quote/${current.token}`) return;
+  browserCustomerQuote = { token: current.token, quote };
+  $("#main").innerHTML = browserQuotePageMarkup(quote, failure?.message);
 }
 function field(label, name, value = "", type = "text", extra = "", help = "") {
   return `<div class="form-field"><label for="${name}">${label}</label><input id="${name}" name="${name}" type="${type}" value="${escape(value)}" ${extra}>${help ? `<small>${help}</small>` : ""}</div>`;
@@ -395,7 +484,7 @@ function contactModal(id) {
       ? "Update their details and keep in touch."
       : "A few details now make following up easy.",
     modalForm(
-      `<div class="form-grid">${field("Full name", "name", c.name, "text", 'required maxlength="100"')}${field("Phone number", "phone", c.phone, "tel", 'required placeholder="+14165550123"', "Include the country code.")}${field("Email (optional)", "email", c.email, "email")}<div class="form-field"><label for="tags">Relationship</label><select name="tags" id="tags"><option value="customer" ${(c.tags || []).includes("customer") ? "selected" : ""}>Customer</option><option value="lead" ${(c.tags || []).includes("lead") ? "selected" : ""}>Lead</option></select></div></div><div class="form-field" style="margin-top:17px"><label for="notes">Notes (optional)</label><textarea name="notes" id="notes" placeholder="Anything worth remembering…">${escape(c.notes || "")}</textarea></div><label class="checkbox-label"><input type="checkbox" name="sms_consent" ${c.sms_consent ? "checked" : ""}><span>This person has given us permission to text them for review requests.</span></label>${c.opted_out ? '<p class="note danger-text">This customer has opted out. Review texts are paused until they text START.</p>' : ""}`,
+      `<div class="form-grid">${field("Full name", "name", c.name, "text", 'required maxlength="100"')}${field("Phone number", "phone", c.phone, "tel", 'required placeholder="+14165550123"', "Include the country code.")}${field("Email (optional)", "email", c.email, "email")}<div class="form-field"><label for="tags">Relationship</label><select name="tags" id="tags"><option value="customer" ${(c.tags || []).includes("customer") ? "selected" : ""}>Customer</option><option value="lead" ${(c.tags || []).includes("lead") ? "selected" : ""}>Lead</option></select></div></div><div class="form-field" style="margin-top:17px"><label for="notes">Notes (optional)</label><textarea name="notes" id="notes" placeholder="Anything worth remembering…">${escape(c.notes || "")}</textarea></div><label class="checkbox-label"><input type="checkbox" name="sms_consent" ${c.sms_consent ? "checked" : ""}><span>This person has given us permission to text them about reviews and quotes.</span></label>${c.opted_out ? '<p class="note danger-text">This customer has opted out. Text messages are paused until they text START.</p>' : ""}`,
       c.id ? "Save customer" : "Add customer",
     ),
   );
@@ -413,6 +502,115 @@ function contactModal(id) {
       ? "New number saved. Edit this customer again to confirm text permission for it."
       : c.id ? "Customer details saved." : "Customer added.",
   );
+}
+function quoteLineMarkup(item = { description: "", quantity: 1, unit_price: "" }) {
+  return `<div class="quote-line"><label class="quote-description"><span>Work or item</span><input data-line="description" aria-label="Work or item" value="${escape(item.description)}" maxlength="500" placeholder="e.g. Replace kitchen faucet" required></label><label><span>Quantity</span><input data-line="quantity" aria-label="Quantity" type="number" min="0.001" max="100000" step="0.001" value="${escape(item.quantity)}" required></label><label><span>Unit price ($)</span><input data-line="unit_price" aria-label="Unit price in dollars" type="number" min="0" max="1000000" step="0.01" value="${escape(item.unit_price)}" required></label><button type="button" class="icon-button quote-remove" aria-label="Remove item">${icon("close")}</button></div>`;
+}
+function readQuoteItems(form) {
+  return Array.from(form.querySelectorAll(".quote-line"), (row) => ({
+    description: $('[data-line="description"]', row).value,
+    quantity: Number($('[data-line="quantity"]', row).value),
+    unit_price: Number($('[data-line="unit_price"]', row).value),
+  }));
+}
+function quoteFormPayload(form) {
+  return { contact_id: $("#quote-contact-id", form).value, line_items: readQuoteItems(form), tax_rate: Number($("#quote-tax-rate", form).value), expiry_date: $("#quote-expiry-date", form).value, notes: $("#quote-notes", form).value, currency: "CAD" };
+}
+function quoteEditor(id) {
+  const q = (state.quotes || []).find((item) => String(item.id) === String(id)) || {};
+  if (q.id && q.status !== "draft") return;
+  if (!state.contacts.length) {
+    openModal("First, add your customer.", "Your quote needs a name to go with it.", '<div class="form-actions"><button class="button" data-action="close-add-contact">Add customer</button></div>');
+    return;
+  }
+  const context = base();
+  const expiry = new Date();
+  expiry.setDate(expiry.getDate() + 30);
+  const defaultExpiry = `${expiry.getFullYear()}-${String(expiry.getMonth() + 1).padStart(2, "0")}-${String(expiry.getDate()).padStart(2, "0")}`;
+  openModal(q.id ? "Fine-tune your quote." : "Put good work in writing.", "Save a draft first. You can review it before sending.", modalForm(
+    `<div class="quote-editor"><div class="form-grid"><div class="form-field"><label for="quote-contact-id">Customer</label><select id="quote-contact-id" required>${options(state.contacts, q.contact_id || state.contacts[0].id)}</select></div><div class="form-field"><label for="quote-expiry-date">Valid through</label><input id="quote-expiry-date" type="date" value="${escape(q.expiry_date || defaultExpiry)}" required></div></div><div class="quote-lines" id="quote-lines">${(q.line_items || [{ description: "", quantity: 1, unit_price: "" }]).map(quoteLineMarkup).join("")}</div><button type="button" class="text-button" id="quote-add-line">${icon("plus")}Add another item</button><div class="quote-calculation"><div class="form-field"><label for="quote-tax-rate">Tax (%)</label><input id="quote-tax-rate" type="number" min="0" max="100" step="0.001" value="${escape(q.tax_rate || 0)}" required><small>Use the rate for this job.</small></div><div id="quote-live-totals" aria-live="polite"></div></div><div class="form-field"><label for="quote-notes">Note to your customer (optional)</label><textarea id="quote-notes" maxlength="5000" placeholder="What's included, timing, or anything else they should know…">${escape(q.notes || "")}</textarea></div><p class="note">All prices are in Canadian dollars. No payment is collected by this app.</p></div>`, "Save draft"));
+  const form = $("#dialog-form");
+  const update = () => {
+    const tax_rate = Number($("#quote-tax-rate", form).value);
+    $("#quote-live-totals").innerHTML = quoteTotalsMarkup({ ...quoteTotals(readQuoteItems(form), tax_rate), tax_rate, currency: "CAD" });
+    const rows = Array.from(form.querySelectorAll(".quote-line"));
+    rows.forEach((row) => $(".quote-remove", row).disabled = rows.length === 1);
+  };
+  $("#quote-add-line").addEventListener("click", () => {
+    $("#quote-lines").insertAdjacentHTML("beforeend", quoteLineMarkup());
+    update();
+    $("#quote-lines").lastElementChild.querySelector("input").focus();
+  });
+  $("#quote-lines").addEventListener("click", (event) => {
+    const button = event.target.closest(".quote-remove");
+    if (button && form.querySelectorAll(".quote-line").length > 1) { button.closest(".quote-line").remove(); update(); }
+  });
+  form.addEventListener("input", update);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const submit = $('button[type="submit"]', form);
+    submit.disabled = true;
+    try {
+      const saved = await api(`${context}/quotes${q.id ? "/" + encodeURIComponent(q.id) : ""}`, { method: q.id ? "PATCH" : "POST", body: JSON.stringify(quoteFormPayload(form)) });
+      await refresh();
+      await quoteDetail(saved.id);
+      toast("Draft saved. Ready when you are.");
+    } catch (error) { showFormError($("#dialog-error"), error); submit.disabled = false; }
+  });
+  update();
+}
+function safeQuoteUrl(url) {
+  try {
+    if (!url) return "";
+    const parsed = new URL(url, location.href);
+    const localDemo = state.config.browser_demo && parsed.protocol === "file:" && parsed.pathname === location.pathname && /^#quote\/[A-Za-z0-9_-]+$/.test(parsed.hash);
+    return ["https:", "http:"].includes(parsed.protocol) || localDemo ? parsed.href : "";
+  } catch { return ""; }
+}
+async function quoteDetail(id) {
+  const context = base();
+  const q = await api(`${context}/quotes/${encodeURIComponent(id)}`);
+  if (context !== base()) return;
+  const customerLink = safeQuoteUrl(q.public_url);
+  const unanswered = ["sent", "viewed"].includes(q.status);
+  openModal(escape(q.reference || "Your quote"), escape(q.contact_name), `<div class="quote-detail"><div class="quote-detail-meta">${badge(q.status)}<span>Valid through ${escape(quoteDate(q.expiry_date))}</span></div><div class="quote-detail-items">${q.line_items.map((item) => `<div><span><strong>${escape(item.description)}</strong><small>${escape(item.quantity)} × ${escape(money(Math.round(item.unit_price * 100), q.currency))}</small></span><strong>${escape(money(item.line_total_cents, q.currency))}</strong></div>`).join("")}</div>${quoteTotalsMarkup(q)}${q.notes ? `<div class="quote-note"><strong>Note to your customer</strong><p>${escape(q.notes)}</p></div>` : ""}${q.status !== "draft" && customerLink ? `<div class="quote-link-box"><strong>Customer link</strong><a href="${escape(customerLink)}" target="_blank" rel="noopener">Open the customer’s quote ${icon("arrow")}</a><p class="note">Anyone with this link can view and respond. Opening it records a view.</p></div>` : ""}${(q.deliveries || []).some((d) => ["failed", "unknown", "uncertain"].includes(d.status)) ? `<div class="error-box">${(q.deliveries || []).filter((d) => ["failed", "unknown", "uncertain"].includes(d.status)).map((d) => `${escape(d.channel === "email" ? "Email" : "Text")}: ${escape(d.error || "Sending could not be confirmed. Check the activity log.")}`).join("<br>")}</div>` : ""}<div class="quote-reminders"><strong>${escape(quoteFollowUpText(q))}</strong>${unanswered && !q.follow_ups_cancelled_at && q.nudge_count < 2 ? `<button class="text-button" data-action="cancel-quote-followups" data-id="${escape(q.id)}">Stop reminders</button>` : ""}</div>${unanswered && isDemo() ? `<div class="quote-demo-tools"><strong>Try the automatic reminders</strong><p class="note">Move this business’s demo quotes forward. No real texts or emails are sent.</p><div><button class="button secondary small-button" data-action="quote-demo-advance" data-days="2" data-id="${escape(q.id)}">Move forward 2 days</button><button class="button secondary small-button" data-action="quote-demo-advance" data-days="3" data-id="${escape(q.id)}">Then 3 more days</button></div></div>` : ""}<div class="form-actions"><button class="button secondary" data-action="close">Close</button>${q.status === "draft" && !(q.deliveries || []).length ? `<button class="button secondary" data-action="edit-quote" data-id="${escape(q.id)}">Edit draft</button>` : ""}${["draft", "sent", "viewed"].includes(q.status) && (q.sendable_channels || ["sms", "email"]).length ? `<button class="button" data-action="send-quote" data-id="${escape(q.id)}">${q.status === "draft" ? "Send quote" : "Send link"} ${icon("send")}</button>` : ""}</div></div>`);
+}
+async function quoteSendModal(id) {
+  const context = base();
+  const q = await api(`${context}/quotes/${encodeURIComponent(id)}`);
+  if (context !== base() || !["draft", "sent", "viewed"].includes(q.status)) return;
+  const contact = state.contacts.find((c) => c.id === q.contact_id) || {};
+  const sendable = q.sendable_channels || ["sms", "email"];
+  const smsAllowed = Boolean(contact.sms_consent && !contact.opted_out && sendable.includes("sms"));
+  const emailAllowed = Boolean(contact.email && sendable.includes("email"));
+  openModal("Send your quote.", `${escape(q.contact_name)} · ${escape(money(q.total_cents, q.currency))}`, modalForm(`<div class="quote-send-options"><label class="checkbox-label"><input type="checkbox" name="channel" value="sms" ${smsAllowed ? "checked" : "disabled"}><span><strong>Text message</strong><small>${smsAllowed ? escape(contact.phone) : !sendable.includes("sms") ? "Already sent or delivery awaiting confirmation." : "Record permission to text this customer first."}</small></span></label><label class="checkbox-label"><input type="checkbox" name="channel" value="email" ${emailAllowed ? (!smsAllowed ? "checked" : "") : "disabled"}><span><strong>Email</strong><small>${emailAllowed ? escape(contact.email) : !sendable.includes("email") ? "Already sent or delivery awaiting confirmation." : "Add an email address to this customer first."}</small></span></label></div><p class="note">Your customer gets a private quote link with Accept and Decline buttons. Unanswered quotes get up to two text reminders, if they have given permission.</p>${isDemo() ? '<p class="note"><strong>Demo mode:</strong> no real texts or emails are sent. Open the customer link after sending to try it.</p>' : ""}`, isDemo() ? "Send demo quote" : "Send quote"));
+  $("#dialog-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const channels = Array.from(form.querySelectorAll('input[name="channel"]:checked'), (input) => input.value);
+    if (!channels.length) { showFormError($("#dialog-error"), new Error("Choose text message, email, or both.")); return; }
+    $('button[type="submit"]', form).disabled = true;
+    let failure;
+    try {
+      const sent = await api(`${context}/quotes/${encodeURIComponent(id)}/send`, { method: "POST", body: JSON.stringify({ channels }) });
+      if ((sent.deliveries || []).some((delivery) => channels.includes(delivery.channel) && ["failed", "unknown", "uncertain"].includes(delivery.status))) failure = new Error("Some messages could not be sent or confirmed. Check the details below.");
+    } catch (error) { failure = error; }
+    try { await refresh(); await quoteDetail(id); } catch (error) { failure ||= error; $("#modal").close(); }
+    toast(failure ? failure.message : isDemo() ? "Demo quote sent. Open the customer link to try it." : "Quote sent. Your customer can now respond.", Boolean(failure));
+  });
+}
+async function cancelQuoteFollowUps(id) {
+  const context = base();
+  await api(`${context}/quotes/${encodeURIComponent(id)}/cancel-follow-ups`, { method: "POST", body: "{}" });
+  await refresh();
+  await quoteDetail(id);
+  toast("Automatic reminders stopped for this quote.");
+}
+async function advanceQuoteDemo(id, days) {
+  await api(`${base()}/quotes/demo/advance`, { method: "POST", body: JSON.stringify({ days: Number(days) }) });
+  await refresh();
+  await quoteDetail(id);
+  toast("Demo time moved forward. Check the activity log for reminders.");
 }
 async function requestModal() {
   const available = state.contacts.filter(
@@ -549,6 +747,11 @@ function demoNudge() {
   );
 }
 document.addEventListener("click", async (e) => {
+  const decision = e.target.closest("[data-decision]");
+  if (decision && state.config.browser_demo && location.hash.startsWith("#quote/")) {
+    await respondBrowserCustomerQuote(decision.dataset.decision);
+    return;
+  }
   const el = e.target.closest("[data-action]");
   if (!el) return;
   try {
@@ -564,6 +767,26 @@ document.addEventListener("click", async (e) => {
         break;
       case "request":
         await requestModal();
+        break;
+      case "add-quote":
+        quoteEditor();
+        break;
+      case "edit-quote":
+        quoteEditor(el.dataset.id);
+        break;
+      case "view-quote":
+        await quoteDetail(el.dataset.id);
+        break;
+      case "send-quote":
+        await quoteSendModal(el.dataset.id);
+        break;
+      case "cancel-quote-followups":
+        el.disabled = true;
+        try { await cancelQuoteFollowUps(el.dataset.id); } finally { el.disabled = false; }
+        break;
+      case "quote-demo-advance":
+        el.disabled = true;
+        try { await advanceQuoteDemo(el.dataset.id, el.dataset.days); } finally { el.disabled = false; }
         break;
       case "done":
         doneModal(el.dataset.id);
@@ -591,6 +814,7 @@ async function switchBusiness(id) {
   Object.assign(state, {
     contacts: [],
     requests: [],
+    quotes: [],
     activity: [],
     dashboard: {},
   });
@@ -634,6 +858,7 @@ refresh().catch((err) => {
 setInterval(() => {
   if (
     !document.hidden &&
+    !browserCustomerQuoteSending &&
     !$("#modal").open &&
     state.page !== "settings" &&
     !document.activeElement?.matches("input,textarea,select")

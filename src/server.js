@@ -14,7 +14,10 @@ const server = suite.app.listen(port, host, () => {
     `Text mode: ${process.env.SMS_MODE === "twilio" ? "Twilio (live)" : "Demo (no texts sent)"}`,
   );
   if (!stopping)
-    worker = startNudgeWorker({ runNudges: suite.runNudges, intervalMs: interval });
+    worker = startNudgeWorker({ runNudges: async () => {
+      await suite.runNudges();
+      await suite.runQuoteNudges();
+    }, intervalMs: interval });
 });
 function stop() {
   if (stopping) return;

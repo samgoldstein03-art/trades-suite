@@ -35,6 +35,7 @@ const timer = setInterval(async () => {
   checking = true;
   try {
     await suite.runNudges();
+    await suite.runQuoteNudges();
   } catch {
     console.error("Demo follow-up check could not finish.");
   } finally {

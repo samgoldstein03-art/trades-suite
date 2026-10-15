@@ -1449,6 +1449,61 @@ dialog::backdrop {
 .mobile-business {
   display: none;
 }
+.badge.draft { background: #eef0ec; color: #647068; }
+.badge.viewed { background: #eae4f4; color: #694c8a; }
+.badge.accepted { background: #dceede; color: #256136; }
+.badge.declined, .badge.expired { background: #f5e5dc; color: #965638; }
+.quote-reference { display: block; color: var(--muted); font-size: 10px; margin-top: 5px; }
+.quote-amount { font-weight: 700; white-space: nowrap; }
+.quote-dashboard-heading { padding: 28px 0 14px; }
+dialog:has(.quote-editor), dialog:has(.quote-detail) { max-width: 760px; width: calc(100% - 32px); }
+.quote-lines { display: grid; gap: 14px; margin: 24px 0 16px; }
+.quote-line { display: grid; grid-template-columns: minmax(0, 1fr) 85px 115px 28px; align-items: end; gap: 10px; }
+.quote-line label { min-width: 0; }
+.quote-line label > span { display: block; font-size: 11px; font-weight: 600; margin-bottom: 7px; }
+.quote-line input { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 11px 10px; font-size: 13px; color: inherit; background: #fff; }
+.quote-remove { margin-bottom: 6px; }
+.quote-remove:disabled { cursor: default; }
+.quote-calculation { display: grid; grid-template-columns: 120px 1fr; gap: 35px; margin: 25px 0; padding-top: 22px; border-top: 1px solid var(--line); }
+.quote-totals { margin-left: auto; width: min(100%, 285px); font-size: 13px; }
+.quote-totals > div { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; padding: 7px 0; }
+.quote-totals .quote-total { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 12px; font-size: 20px; }
+.quote-total small { font-size: 10px; color: var(--muted); }
+.quote-detail-meta { display: flex; gap: 12px; justify-content: space-between; align-items: center; font-size: 12px; }
+.quote-detail-items { margin: 24px 0 18px; }
+.quote-detail-items > div { display: flex; justify-content: space-between; gap: 24px; padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.quote-detail-items > div > strong { white-space: nowrap; }
+.quote-detail-items small { display: block; margin-top: 6px; color: var(--muted); }
+.quote-detail-items > div > span { overflow-wrap: anywhere; }
+.quote-note { padding: 18px 0 0; margin-top: 15px; font-size: 13px; }
+.quote-note p { white-space: pre-wrap; line-height: 1.7; }
+.quote-link-box, .quote-demo-tools { padding: 18px; margin-top: 22px; border: 1px solid var(--line); border-radius: 12px; background: #f7f9f3; font-size: 12px; }
+.quote-link-box a { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-top: 12px; font-weight: 700; text-underline-offset: 3px; }
+.quote-link-box p { margin-bottom: 0; }
+.quote-reminders { display: flex; justify-content: space-between; align-items: center; gap: 14px; border-top: 1px solid var(--line); padding-top: 20px; margin-top: 22px; font-size: 12px; }
+.quote-demo-tools > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.quote-send-options { margin: 12px 0 22px; }
+.quote-send-options .checkbox-label { padding: 14px; margin: 10px 0; border: 1px solid var(--line); border-radius: 10px; }
+.quote-send-options small { display: block; margin-top: 5px; color: var(--muted); }
+.customer-quote-view .sidebar, .customer-quote-view .topbar, .customer-quote-view .page-footer, .customer-quote-view #public-demo-notice { display: none; }
+.customer-quote-view .main-shell { margin: 0; width: 100%; padding: 0; }
+.customer-quote-view #main { max-width: none; padding: 32px 18px; }
+.browser-customer-quote { max-width: 700px; margin: 0 auto; }
+.browser-quote-back { display: inline-block; font-size: 13px; font-weight: 600; margin-bottom: 13px; text-underline-offset: 3px; }
+.browser-quote-explanation { font-size: 12px; line-height: 1.6; color: #6c7866; margin: 0 0 20px; }
+.browser-quote-error { margin-top: 16px; padding: 16px; border-radius: 12px; background: #fcece4; color: #92482f; font-size: 13px; }
+@media (max-width: 600px) {
+  .sidebar nav { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2px; }
+  .sidebar .nav-link { padding: 7px 2px; text-align: center; }
+  .quote-line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 28px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+  .quote-description { grid-column: 1 / -1; }
+  .quote-calculation { gap: 20px; grid-template-columns: 90px 1fr; }
+  .quote-totals { font-size: 11px; }
+  .quote-totals .quote-total { font-size: 17px; }
+  .quote-reminders { align-items: flex-start; flex-direction: column; }
+  .quote-detail .form-actions { flex-wrap: wrap; }
+  .quote-detail-meta { font-size: 11px; gap: 8px; }
+}
 /* Keep the business switcher available on tablets as well as phones. */
 @media (min-width: 601px) and (max-width: 850px) {
   .mobile-business {

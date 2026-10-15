@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "A simple review-request desk for small trades businesses.",
+  "description": "Review requests, quotes and follow-ups for small trades businesses.",
   "engines": {
     "node": ">=24.0.0"
   },
@@ -21,6 +21,7 @@
     "express": "^5.1.0",
     "express-rate-limit": "8.7.1",
     "multer": "^2.0.2",
+    "nodemailer": "10.1.0",
     "twilio": "^5.10.3"
   }
 }

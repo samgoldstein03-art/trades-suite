@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { openDatabase, transaction } from "./db.js";
 import { createAdminAccess } from "./admin.js";
 import { configureProxyTrust, createApiRateLimit } from "./rate-limits.js";
+import { createQuoteModule, QuoteError } from "./quotes.js";
+import { emailTransport, emailReady } from "./email.js";
 import {
   buildSms,
   credentialsFor,
@@ -87,6 +89,8 @@ export function createApp({
   smsMode = process.env.SMS_MODE || "demo",
   now = () => new Date(),
   sendSms = twilioTransport,
+  sendEmail = emailTransport,
+  quotePublicOrigin = process.env.QUOTE_PUBLIC_BASE_URL || "",
   uploadDir = process.env.UPLOAD_DIR || resolve(ROOT, "data/uploads"),
 } = {}) {
   if (!["demo", "twilio"].includes(smsMode))
@@ -97,6 +101,13 @@ export function createApp({
   configureProxyTrust(app);
   const uploadPath = resolve(uploadDir);
   mkdirSync(uploadPath, { recursive: true });
+  const quotes = createQuoteModule({
+    db, smsMode, now, sendSms, sendEmail, uploadDir: uploadPath,
+    emailReady: sendEmail === emailTransport ? emailReady : () => true,
+    publicOrigin: (req) => quotePublicOrigin || admin.adminOrigin ||
+      (smsMode === "demo" && /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(req.get("host") || "")
+        ? `${req.protocol}://${req.get("host")}` : ""),
+  });
   const stamp = () => new Date(now()).toISOString();
   let workerLastCheckedAt = null;
   const getBusiness = (id) => {
@@ -376,6 +387,7 @@ export function createApp({
     db.prepare("SELECT 1").get();
     res.set("Cache-Control", "no-store").json({ status: "ok" });
   });
+  app.use("/q", createApiRateLimit(), express.json({ limit: "8kb" }), quotes.publicRouter);
   app.use("/api", createApiRateLimit());
   app.use(admin.middleware);
 
@@ -421,6 +433,8 @@ export function createApp({
     }
     next();
   });
+
+  app.use("/api/businesses/:businessId/quotes", quotes.adminRouter);
 
   app.get("/api/config", (req, res) =>
     res.json({ sms_mode: smsMode, nudge_after_hours: 72 }),
@@ -892,6 +906,7 @@ export function createApp({
       upcoming_nudges: upcoming.slice(0, 8),
       attention_needed: attention,
       worker_last_checked_at: workerLastCheckedAt,
+      ...quotes.dashboard(business.id),
     });
   });
 
@@ -1133,7 +1148,7 @@ export function createApp({
               ? "Choose a logo smaller than 2 MB."
               : "Upload one logo image at a time.",
         });
-    if (error instanceof AppError)
+    if (error instanceof AppError || error instanceof QuoteError)
       return res.status(error.status).json({ error: error.message });
     if (error?.type === "entity.parse.failed")
       return res
@@ -1154,5 +1169,5 @@ export function createApp({
       .json({ error: "Something went wrong. Refresh and try again." });
   });
 
-  return { app, db, runNudges, close: () => db.close() };
+  return { app, db, runNudges, runQuoteNudges: quotes.runQuoteNudges, close: () => db.close() };
 }

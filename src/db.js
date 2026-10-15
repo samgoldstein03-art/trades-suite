@@ -97,6 +97,60 @@ export function openDatabase(dbPath) {
     CREATE INDEX IF NOT EXISTS activity_business ON activity(business_id, created_at DESC);
     PRAGMA user_version = 1;
   `);
+  // Additive, repeatable Phase 2 migration. Existing customers and activity stay
+  // in their original tables; composite keys prevent cross-business links.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS quotes (
+      business_id TEXT NOT NULL REFERENCES businesses(id),
+      id TEXT NOT NULL,
+      contact_id TEXT NOT NULL,
+      reference TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','sent','viewed','accepted','declined','expired')),
+      line_items TEXT NOT NULL,
+      tax_rate REAL NOT NULL,
+      subtotal_cents INTEGER NOT NULL,
+      tax_cents INTEGER NOT NULL,
+      total_cents INTEGER NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'CAD',
+      expiry_date TEXT NOT NULL,
+      notes TEXT NOT NULL DEFAULT '',
+      public_token TEXT NOT NULL UNIQUE,
+      snapshot_json TEXT,
+      public_url TEXT,
+      mode TEXT NOT NULL CHECK(mode IN ('demo','twilio')),
+      sent_at TEXT,
+      viewed_at TEXT,
+      responded_at TEXT,
+      follow_ups_cancelled_at TEXT,
+      follow_up_phone TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(business_id,id),
+      FOREIGN KEY(business_id,contact_id) REFERENCES contacts(business_id,id)
+    );
+    CREATE INDEX IF NOT EXISTS quotes_status ON quotes(business_id,status,sent_at);
+    CREATE TABLE IF NOT EXISTS quote_deliveries (
+      id TEXT PRIMARY KEY,
+      business_id TEXT NOT NULL,
+      quote_id TEXT NOT NULL,
+      channel TEXT NOT NULL CHECK(channel IN ('sms','email')),
+      kind TEXT NOT NULL CHECK(kind IN ('initial','nudge_2','nudge_5')),
+      status TEXT NOT NULL CHECK(status IN ('sending','sent','simulated','failed','uncertain','skipped')),
+      recipient TEXT,
+      body TEXT,
+      provider_sid TEXT,
+      error_code INTEGER,
+      error TEXT,
+      attempts INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(business_id,quote_id,channel,kind),
+      FOREIGN KEY(business_id,quote_id) REFERENCES quotes(business_id,id)
+    );
+  `);
+  if (!db.prepare("PRAGMA table_info(activity)").all().some((column) => column.name === "quote_id"))
+    db.exec("ALTER TABLE activity ADD COLUMN quote_id TEXT");
+  db.exec("PRAGMA user_version = 2");
   return db;
 }
 

@@ -12,6 +12,73 @@ function storage() {
 }
 const post = (body) => ({ method: "POST", body: JSON.stringify(body) });
 
+async function draftQuote(api, base, customer) {
+  return api(`${base}/quotes`, post({ contact_id: customer.id, line_items: [{ description: "Replace kitchen tap", quantity: 2, unit_price: 125.25 }], tax_rate: 13, expiry_date: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10), notes: "Parts included." }));
+}
+
+test("browser quotes send, open and accept across tabs while preserving business isolation", async () => {
+  const saved = storage();
+  const api = createBrowserDemo(saved);
+  const [business, other] = await api("/api/businesses");
+  const base = `/api/businesses/${business.id}`;
+  const customer = (await api(`${base}/contacts`))[0];
+  const draft = await draftQuote(api, base, customer);
+  assert.equal(draft.total_cents, 28307);
+  await assert.rejects(api(`/api/businesses/${other.id}/quotes/${draft.id}`), /not found/);
+  const sent = await api(`${base}/quotes/${draft.id}/send`, post({ channels: ["sms", "email"] }));
+  assert.equal(sent.status, "sent");
+  assert.equal(sent.deliveries.length, 2);
+  assert.equal((await api(`${base}/dashboard`)).quotes_awaiting_response.length, 1);
+  assert.ok((await api(`${base}/activity`)).some((entry) => entry.quote_id === draft.id && entry.kind === "sms_sent" && entry.body.endsWith(`${business.name}\nReply STOP to opt out`)));
+  const token = sent.public_url.split("#quote/")[1];
+  const customerTab = createBrowserDemo(saved);
+  const viewed = await customerTab(`/q/${token}/data`);
+  assert.equal(viewed.status, "viewed");
+  assert.equal(viewed.customer_name, customer.name);
+  assert.equal(viewed.contact_id, undefined);
+  await customerTab(`/q/${token}/respond`, post({ decision: "accepted" }));
+  assert.equal((await api(`${base}/quotes/${draft.id}`)).status, "accepted");
+  assert.equal((await api(`${base}/quotes?status=accepted`)).length, 1);
+  assert.equal((await api(`${base}/dashboard`)).quotes_awaiting_response.length, 0);
+  assert.equal((await api(`${base}/quotes/demo/advance`, post({ days: 5 }))).sent, 0);
+  await assert.rejects(customerTab(`/q/${token}/respond`, post({ decision: "declined" })), /no longer/);
+});
+
+test("browser quote reminders run at two and five days once, and cancellation stops them", async () => {
+  const api = createBrowserDemo(storage());
+  const [business] = await api("/api/businesses");
+  const base = `/api/businesses/${business.id}`;
+  const customer = (await api(`${base}/contacts`))[0];
+  const draft = await draftQuote(api, base, customer);
+  await api(`${base}/quotes/${draft.id}/send`, post({ channels: ["sms"] }));
+  assert.equal((await api(`${base}/quotes/demo/advance`, post({ days: 2 }))).sent, 1);
+  assert.equal((await api(`${base}/quotes/${draft.id}`)).nudge_count, 1);
+  assert.equal((await api(`${base}/quotes/demo/advance`, post({ days: 3 }))).sent, 1);
+  assert.equal((await api(`${base}/quotes/demo/advance`, post({ days: 5 }))).sent, 0);
+  assert.equal((await api(`${base}/quotes/${draft.id}`)).nudge_count, 2);
+  const stopped = await draftQuote(api, base, customer);
+  await api(`${base}/quotes/${stopped.id}/send`, post({ channels: ["sms"] }));
+  await api(`${base}/quotes/${stopped.id}/cancel-follow-ups`, post({}));
+  assert.equal((await api(`${base}/quotes/demo/advance`, post({ days: 5 }))).sent, 0);
+});
+
+test("browser quotes skip stale reminders after downtime and do not expose unsent drafts", async () => {
+  const saved = storage();
+  const api = createBrowserDemo(saved);
+  const [business] = await api("/api/businesses");
+  const base = `/api/businesses/${business.id}`;
+  const customer = (await api(`${base}/contacts`))[0];
+  const draft = await draftQuote(api, base, customer);
+  const stored = JSON.parse(saved.getItem("tradesuite-browser-demo-v1"));
+  const token = stored.quotes[0].token;
+  await assert.rejects(api(`/q/${token}/data`), /not found/);
+  await api(`${base}/quotes/${draft.id}/send`, post({ channels: ["sms"] }));
+  assert.equal((await api(`${base}/quotes/demo/advance`, post({ days: 5 }))).sent, 1);
+  const delivered = await api(`${base}/quotes/${draft.id}`);
+  assert.equal(delivered.deliveries.find((d) => d.kind === "nudge_2").status, "skipped");
+  assert.equal(delivered.nudge_count, 1);
+});
+
 test("standalone browser demo supports business/customer/request/nudge/done and reload", async () => {
   const saved = storage();
   const api = createBrowserDemo(saved);

@@ -16,6 +16,12 @@ documentation here. Never commit real credentials, `.env`, customer databases,
 customer uploads, hosting claim tokens, or local publication state. Example
 configuration must contain placeholders only.
 
-Phase 1 uses Node.js/Express and SQLite. Keep the interface plain-spoken. Quotes
-and missed-call text-back are later phases. A public browser demo simulates SMS;
-publishing code or that demo does not verify a hosted backend or real SMS delivery.
+Phases 1 and 2 use Node.js/Express and SQLite. Keep the interface plain-spoken.
+Phase 1 covers review requests; Phase 2 adds quotes and their follow-ups using
+the existing businesses, contacts, and activity records. Missed-call text-back
+remains Phase 3 and is not built. Keep every quote scoped to its business, never
+write customer quote tokens to console/server access logs, and keep delivered
+quote terms unchanged. The private business Activity log intentionally records
+sent message bodies, including their customer quote links. A public
+browser demo simulates SMS and email; publishing code or that demo does not
+verify a hosted backend or real message delivery.

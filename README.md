@@ -1,8 +1,8 @@
 # Trades Suite
 
-A simple review-request desk for HVAC, plumbing, and electrical shops. Pick a business, add a customer, and ask for a Google review. Each business has its own customers, activity, requests, and Twilio settings.
+A simple customer desk for HVAC, plumbing, and electrical shops. Pick a business, add a customer, ask for a Google review, or send a quote they can accept from their phone. Each business has its own customers, activity, review requests, quotes, and sending settings.
 
-This repository implements **Phase 1** using **Node.js, Express, and SQLite**, with a plain HTML/CSS/JavaScript interface. It has one admin workspace shared across businesses. Hosted installations require one admin password; there are no separate business accounts.
+This repository implements **Phases 1 and 2** using **Node.js, Express, and SQLite**, with a plain HTML/CSS/JavaScript interface. It has one admin workspace shared across businesses. Hosted installations require one admin password; there are no separate business accounts. Customer quote pages need no login.
 
 ## Start locally
 
@@ -45,7 +45,7 @@ npm start
 
 Open [http://127.0.0.1:3000](http://127.0.0.1:3000). The first run creates the database automatically. Keep this terminal running while using the app. `npm run dev` restarts the server when source files change.
 
-**Demo mode never contacts Twilio and never sends a real text.** It records simulated messages so you can try the whole workflow before supplying credentials. The interface identifies demo mode and demo messages. An app running in Twilio mode does not send follow-ups for old demo requests.
+**Demo mode never contacts Twilio or SMTP and never sends a real text or email.** It records simulated messages so you can try the whole workflow before supplying credentials. The interface identifies demo mode and demo messages. An app running in Twilio mode does not send follow-ups for old demo requests or quotes.
 
 For a ready-to-use walkthrough, stop any running app on port 3000 and run **`npm run demo`**. It creates sample businesses and customers in a separate `data/demo.sqlite` database, always uses simulated texts, and preserves your demo changes between runs. `npm start` uses the database configured in `.env`. Set `DEMO_DATABASE_PATH` if you want a different demo file.
 
@@ -67,7 +67,7 @@ The seed command refuses a nonempty workspace or a server using Twilio mode. It 
 4. **Check Activity.** The message and the request's status changes are recorded with timestamps. Dashboard totals and recent activity update for the selected business.
 5. **Mark done.** When you see the customer's review, mark the request done. The app does not read Google reviews or guess whether a review has been posted.
 
-Use the business switcher to work with another business. Changing businesses changes the customer list, review requests, dashboard, and activity together.
+Use the business switcher to work with another business. Changing businesses changes the customer list, review requests, quotes, dashboard, and activity together.
 
 Changing a customer's phone number clears their text permission. Save the new number, then edit the customer again to confirm permission for that number. An older request will not nudge the new number; finish that request before starting a new one.
 
@@ -127,7 +127,7 @@ Use the business's actual ID. The business API at `/api/businesses` returns thes
 
 STOP and other standard opt-out keywords block further sends to that phone number for that business, including automatic nudges. Opt-outs are recorded by business and phone number, so adding another contact with the same number does not bypass the block. Twilio also blocks opted-out numbers on its side. The app accepts `OptOutType` when configured through Twilio Advanced Opt-Out and recognizes standard reply text; see [Twilio opt-out handling](https://www.twilio.com/docs/messaging/tutorials/advanced-opt-out). Twilio handles its own confirmation reply; the app does not send a second confirmation SMS. A customer must reply START or UNSTOP to the business's number to remove the phone-level block; checking permission in the admin form cannot override it.
 
-Every review-request and nudge SMS ends with the business name and this exact line:
+Every review-request, quote, and follow-up SMS ends with the business name and this exact line:
 
 ```text
 Reply STOP to opt out
@@ -167,6 +167,47 @@ For a visible walkthrough in **demo mode**:
 
 The time simulation is unavailable in Twilio mode. Live sends always use the real 72-hour due time.
 
+## Quotes and follow-ups (Phase 2)
+
+1. Select the business and open **Quotes**, then **Create quote**. Choose an existing customer and add the work, quantity, unit price, tax percentage, expiry date, and any customer-facing notes. The app calculates line totals, subtotal, tax, and total in Canadian dollars. Prices are stored as cents, and each line and tax amount is rounded to the nearest cent.
+2. Save the draft and check the details. Send it by **SMS**, **email**, or both. SMS uses that business's existing Twilio configuration and requires text permission. Email is optional and uses the SMTP settings below. Demo mode simulates both channels.
+3. The customer receives a link to a mobile-friendly page with the quote details and **Accept** / **Decline** buttons. They need no account or admin password. Opening the page marks a sent quote **Viewed**; their decision updates the quote immediately and writes to the same business's Activity log.
+4. Use the quote list's status filter to find drafts, sent, viewed, accepted, declined, or expired quotes. The dashboard also lists **Quotes awaiting response**. Open an unanswered quote to stop its reminders at any time.
+
+Drafts are editable. Once delivery has been attempted, the quote keeps the terms and customer details that were prepared for that delivery; changing a business or customer later does not rewrite what the customer received. Create a new quote for revised terms. Quote expiry uses the end of the selected date in **UTC**. An expired quote cannot be accepted or declined and receives no further reminders.
+
+Customer links contain a long, random access token. Anyone who has the link can see that quote and respond, so share it only with its intended customer. Do not put links in public posts or server access logs. The private Activity log records sent messages and their links. The public page shows the quote's customer-facing details, not private customer notes, other quotes, or the admin workspace. The link opens the same stored quote on any device when the real backend is hosted; browser-demo links are only for the sample workspace in that browser.
+
+### Quote reminders
+
+Unanswered sent or viewed quotes are eligible for **one SMS after 48 hours and one after 120 hours**, measured from the original successful send. The same worker that checks review requests checks these reminders on startup and at `NUDGE_INTERVAL_MS`. Text permission, the original phone number, the business's own Twilio configuration, and phone-level opt-outs are checked again before sending. Sending a quote only by email does not bypass these requirements for its SMS reminders.
+
+Accepting, declining, expiring, or stopping reminders prevents future unclaimed sends. A message already being sent cannot be recalled. Reminder attempts are reserved in SQLite to prevent overlapping checks from sending the same reminder twice. If the server restarts after both reminder times, it skips the two-day reminder and sends only the five-day reminder, avoiding a burst of texts. Each reminder gets one attempt; failures and uncertain outcomes appear in delivery history and Activity without an automatic retry. An uncertain message must be checked in the provider's log before any further sending. Provider acceptance means a message was queued, not that the customer received or read it.
+
+The automated tests exercise quote creation, calculated totals, business isolation, delivery, public viewing and decisions, expiry, cancelled reminders, opt-outs, and the two reminder boundaries using a fake clock and providers. Run `npm test`; no test needs real Twilio or email credentials. In demo mode, open a sent quote and use its reminder test controls to exercise the sequence without waiting. To check the full flow manually, create a quote, send a simulated SMS, open the customer link, accept it, and refresh the owner's quote list and Activity.
+
+### Customer quote link address
+
+Live quotes require an externally reachable **HTTPS origin**. Set `QUOTE_PUBLIC_BASE_URL=https://your-service.example` without a path or trailing slash. If blank, the app uses `ADMIN_ORIGIN`, then Render's `RENDER_EXTERNAL_URL`. The hostname must point to the running Express app; a static browser demo cannot serve live quotes. Local HTTP links are allowed only for the private demo walkthrough.
+
+Customer quote pages and their decision endpoints are intentionally public and have their own request limits. All business/customer administration stays behind the shared admin password. Keep the quote page paths reachable through any reverse proxy; do not require the admin login on them.
+
+### Optional email setup
+
+SMS-only quotes work without an email account. To offer email as well, use that business's authenticated SMTP service and an address the provider allows it to send from. For a business with settings key `HARBOR`, add these **private server environment variables**:
+
+```dotenv
+BUSINESS_HARBOR_SMTP_HOST=smtp.your-provider.example
+BUSINESS_HARBOR_SMTP_PORT=587
+BUSINESS_HARBOR_SMTP_USER=your_smtp_username
+BUSINESS_HARBOR_SMTP_PASSWORD=your_smtp_password
+BUSINESS_HARBOR_SMTP_FROM=quotes@your-business.example
+```
+
+Use the provider's SMTP-specific credential or app password when required. These examples are placeholders. Add a separate group for every business and restart the app. `SMTP_FROM` must be a single email address, without a display name or recipient list. Do not paste SMTP passwords into the business form, Git, or customer notes.
+
+Port **587** requires a successful STARTTLS upgrade; port **465** starts with TLS. Certificate verification stays enabled, plaintext SMTP is not supported, and sending uses bounded timeouts without automatic retries. Provider debug logging is disabled. See the [Nodemailer SMTP documentation](https://nodemailer.com/smtp) for the transport options and your provider's instructions for sender/domain verification. Email mode follows `SMS_MODE`: `demo` sends no email, and `twilio` enables real configured deliveries. Confirm one authorized test email arrived before calling email delivery verified.
+
 ## Settings and storage
 
 | Environment variable          | Default             | Purpose                                                                 |
@@ -179,6 +220,7 @@ The time simulation is unavailable in Twilio mode. Live sends always use the rea
 | `NUDGE_INTERVAL_MS`           | `60000`             | Automatic nudge check interval in milliseconds.                         |
 | `TRUST_PROXY_HOPS`            | `0`                 | `0` for direct/local access; `1` only behind one trusted ingress proxy, as configured in the Render template. |
 | `PUBLIC_BASE_URL`             | Render URL or unset | Exact public HTTPS origin for signed Twilio webhooks.                   |
+| `QUOTE_PUBLIC_BASE_URL`       | Admin or Render URL | Public HTTPS origin for live customer quote links.                      |
 | `ADMIN_ORIGIN`                | Render URL or unset | Exact HTTPS origin of the hosted admin app.                             |
 | `ADMIN_USERNAME`              | `admin`             | Shared admin sign-in name.                                              |
 | `ADMIN_PASSWORD`              | unset               | Unique password of at least 16 characters; required when hosted.        |
@@ -186,10 +228,15 @@ The time simulation is unavailable in Twilio mode. Live sends always use the rea
 | `BUSINESS_<KEY>_ACCOUNT_SID`  | unset               | That business's Twilio account.                                         |
 | `BUSINESS_<KEY>_AUTH_TOKEN`   | unset               | That business's Twilio secret.                                          |
 | `BUSINESS_<KEY>_PHONE_NUMBER` | unset               | That business's SMS-capable Twilio number.                              |
+| `BUSINESS_<KEY>_SMTP_HOST`    | unset               | That business's authenticated SMTP hostname (email is optional).        |
+| `BUSINESS_<KEY>_SMTP_PORT`    | `587`               | `587` with required STARTTLS, or `465` with TLS from connection start.   |
+| `BUSINESS_<KEY>_SMTP_USER`    | unset               | That business's SMTP username.                                         |
+| `BUSINESS_<KEY>_SMTP_PASSWORD`| unset               | That business's SMTP secret.                                           |
+| `BUSINESS_<KEY>_SMTP_FROM`    | unset               | A single sender email address approved by that business's provider.    |
 
 Run one app instance for a workspace and use persistent local storage. The default data directory and `.env` are excluded from Git. For a simple consistent backup, stop the server, copy the database and its existing companion files together with the uploads folder to private backup storage, and restart. Restore them together. Store a separate protected backup of the environment configuration; it contains secrets. Do not remove the database to clear a warning or retry an uncertain message.
 
-This phase has **one admin view and no per-business logins**. Private localhost use can run without a password. A hosted installation requires `ADMIN_PASSWORD` and an HTTPS admin origin; the app refuses to start without them. Browser HTTP Basic authentication protects the pages, API, and uploaded logos using `ADMIN_USERNAME` and `ADMIN_PASSWORD`. The `/healthz` route and signed Twilio webhook remain reachable without that password.
+This app has **one admin view and no per-business logins**. Private localhost use can run without a password. A hosted installation requires `ADMIN_PASSWORD` and an HTTPS admin origin; the app refuses to start without them. Browser HTTP Basic authentication protects the admin pages, API, and uploaded logos using `ADMIN_USERNAME` and `ADMIN_PASSWORD`. Customer quote links, their public decision endpoints, `/healthz`, and the signed Twilio webhook remain reachable without that password.
 
 API requests are limited to **300 per five minutes per IP address**. The shared admin sign-in has a stricter limit of **10 failed attempts per 15 minutes per IP address**, covering pages, API routes, and uploads. Successful sign-ins do not consume that failed-attempt allowance, but once it is exhausted even correct credentials must wait for the window to reset. A blocked request returns HTTP 429 with a `Retry-After` header. Counters are held in memory and reset when the process restarts; this matches the single-instance deployment below.
 
@@ -201,9 +248,11 @@ Set `ADMIN_ORIGIN=https://your-admin.example` to the exact external origin, with
 
 **Built in Phase 1:** multiple editable business profiles with logo uploads; separate customer lists with notes and tags; per-business Twilio configuration; review-request SMS; one automatic three-day nudge; manual completion; phone-level opt-out handling; timestamped activity; a per-business dashboard; demo mode and automated tests.
 
-**Planned for later phases:** quote builder and missed-call text-back. These features are not built or shown as working controls. There are no per-business logins, payments, billing, mobile app, Google review detection, or delivery-receipt processing in this phase.
+**Built in Phase 2:** business-scoped quotes with line items, tax, totals, expiry, and customer-facing notes; drafts and status filters; delivery by SMS and optional email; mobile-friendly customer links with Accept/Decline; activity and dashboard integration; two cancellable SMS reminders after two and five days; simulated sends and automated tests.
 
-The data model keeps businesses as the owner of contacts, review requests, messages, and activity records. Relationships carry `business_id`, and references are checked within the selected business. Future quote and missed-call records can use the same business/contact IDs and activity stream without combining customers from different businesses. Twilio credentials remain environment configuration rather than becoming business data.
+**Planned for Phase 3:** missed-call text-back. It is not built or shown as a working control. There are no per-business logins, payments, billing, mobile app, Google review detection, or delivery-receipt processing in these phases.
+
+The data model keeps businesses as the owner of contacts, review requests, quotes, messages, and activity records. Relationships carry `business_id`, and references are checked within the selected business. Quotes reuse the existing business/contact IDs and activity stream; future missed-call records can use those same relationships without combining customers from different businesses. Twilio and SMTP credentials remain environment configuration rather than becoming business data.
 
 ## Hosting
 
@@ -221,14 +270,17 @@ This template uses **one paid web service and a 1 GB persistent disk**. Render r
 4. Deploy. The service builds a Node.js 24 image and starts the real Express app with an initially empty SQLite database. It does not load the standalone browser demo or seed fictional records. The image includes server code, interface files, the read-only Twilio checker, and production dependencies; it excludes `.env`, local databases, uploads, and demo seed scripts.
 5. Open the HTTPS `onrender.com` address shown by Render and sign in with the shared admin credentials. The app uses Render's assigned `RENDER_EXTERNAL_URL` as the default admin and webhook origin. For a custom domain, set `ADMIN_ORIGIN` and `PUBLIC_BASE_URL` to the exact HTTPS origin you will use, without a path or trailing slash, then redeploy. See [Render's default environment variables](https://render.com/docs/environment-variables).
 6. Add a sample business and customer, send a simulated request, and check Activity. Use **Test the 3-day nudge**, verify one follow-up, and mark the request done. Restart the service and confirm the records and any uploaded logo remain. Confirm an unauthenticated browser is asked to sign in and `/healthz` returns HTTP 200.
+7. Create a demo quote, send its link, and open that link in a separate browser session without the admin password. Accept it and check that its status and Activity update. Test reminders on a second unanswered quote. Render's address also becomes the default customer quote origin; set `QUOTE_PUBLIC_BASE_URL` only if these links should use a different configured HTTPS origin.
 
-The shared login protects the dashboard, customer data, API, and uploaded logos. The readiness route and signed Twilio webhook remain reachable without the admin password. This is one owner login for the whole workspace; it does not create separate business accounts.
+The shared login protects the dashboard, customer data, admin API, and uploaded logos. Customer quote links and decisions, the readiness route, and the signed Twilio webhook remain reachable without the admin password. This is one owner login for the whole workspace; it does not create separate business accounts.
 
 ### Turn on real SMS
 
 In the service's **Environment** page, add the Twilio variables for each business's SMS settings key. For example, `HARBOR` uses `BUSINESS_HARBOR_ACCOUNT_SID`, `BUSINESS_HARBOR_AUTH_TOKEN`, and `BUSINESS_HARBOR_PHONE_NUMBER`. Add the actual values privately, following the Twilio setup section above. Set `SMS_MODE=twilio` and redeploy only when ready for real sends. `SMS_MODE` is prompted with `sync: false` so later Blueprint syncs do not reset the mode you selected. See [Blueprint environment settings](https://render.com/docs/blueprint-spec#prompting-for-secret-values).
 
 Point that business's Twilio incoming-message webhook to `https://YOUR-SERVICE.onrender.com/webhooks/twilio/BUSINESS_ID` using HTTP POST. Do not include the admin password in the URL. Verify one authorized test send to a number you control, its Activity entry, and its final delivery result in Twilio. Receipt on the phone is required before calling real SMS verified. Old simulated requests are not nudged in live mode.
+
+For optional quote emails, add each business's SMTP variables in the same private Environment page. Send an authorized test quote to your own email address and confirm receipt. SMTP credentials are not needed for SMS-only quotes.
 
 ### Storage and operation
 

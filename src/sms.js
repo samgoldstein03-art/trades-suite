@@ -20,12 +20,22 @@ export function credentialsReady(business) {
   );
 }
 
-export function buildSms(business, contact, kind = "initial") {
+export function buildSms(business, contact, kind = "initial", details = {}) {
   const greeting = `Hi ${contact.name.split(/\s+/)[0]},`;
+  if (kind === "quote" || kind === "quote_nudge") {
+    const message = kind === "quote"
+      ? `${greeting} your quote${details.reference ? ` ${details.reference}` : ""} from ${business.name} is ready. View it and accept or decline here: ${details.url}`
+      : `${greeting} a friendly reminder about your quote from ${business.name}. You can view it and let us know here: ${details.url}`;
+    return withSmsFooter(business, message);
+  }
   const message =
     kind === "nudge"
       ? `${greeting} just one friendly reminder. If you have a moment, we'd love your feedback: ${business.google_review_url}`
       : `${greeting} thanks for choosing ${business.name}! Would you share your experience on Google? ${business.google_review_url}`;
+  return withSmsFooter(business, message);
+}
+
+function withSmsFooter(business, message) {
   return `${message}\n\n${business.name}\nReply STOP to opt out`;
 }
 
