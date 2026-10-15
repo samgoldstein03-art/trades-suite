@@ -5,7 +5,7 @@ import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { transaction } from "./db.js";
 import { buildSms, credentialsFor, credentialsReady, PHONE_PATTERN, safeFailure } from "./sms.js";
-import { buildQuoteEmailText, safeEmailFailure } from "./email.js";
+import { buildQuoteEmailText, safeEmailFailure, validEmailAddress } from "./email.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DAY = 86400000;
@@ -88,19 +88,25 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
     return q;
   }
   function deliveries(q) {
-    return db.prepare("SELECT id,channel,kind,status,error,error_code,attempts,created_at,updated_at FROM quote_deliveries WHERE business_id=? AND quote_id=? ORDER BY created_at,rowid")
+    return db.prepare("SELECT id,channel,kind,status,error,error_code,email_bounced,attempts,created_at,updated_at FROM quote_deliveries WHERE business_id=? AND quote_id=? ORDER BY created_at,rowid")
       .all(q.business_id, q.id);
+  }
+  function initialDeliveries(q) {
+    return db.prepare("SELECT * FROM quote_deliveries WHERE business_id=? AND quote_id=? AND kind='initial' AND status=? ORDER BY channel DESC")
+      .all(q.business_id, q.id, smsMode === "demo" ? "simulated" : "sent");
   }
   function quoteView(q) {
     const snapshot = q.snapshot_json ? JSON.parse(q.snapshot_json) : null;
     const sends = deliveries(q);
-    const nudges = sends.filter((d) => d.kind !== "initial" && ["sent", "simulated"].includes(d.status)).length;
+    const nudges = sends.filter((d) => d.kind !== "initial" && ["sent", "simulated"].includes(d.status));
+    const initials = initialDeliveries(q);
+    const followUpsPending = OPEN.has(q.status) && !q.follow_ups_cancelled_at && !blocked(q.business_id, contact(q.business_id, q.contact_id)) && initials.some((initial) => !sends.some((d) => d.channel === initial.channel && d.kind === "nudge_5"));
     const { public_token, snapshot_json, follow_up_phone, ...visible } = q;
     const sendable = ["draft", "sent", "viewed"].includes(q.status) && !blocked(q.business_id, contact(q.business_id, q.contact_id)) ? ["sms", "email"].filter((channel) => {
       const attempt = sends.find((d) => d.channel === channel && d.kind === "initial");
       return !attempt || attempt.status === "failed";
     }) : [];
-    return { ...visible, contact_name: snapshot?.customer_name || contact(q.business_id, q.contact_id).name, line_items: JSON.parse(q.line_items), deliveries: sends, nudge_count: nudges, nudges_sent: nudges, sendable_channels: sendable };
+    return { ...visible, contact_name: snapshot?.customer_name || contact(q.business_id, q.contact_id).name, line_items: JSON.parse(q.line_items), deliveries: sends, nudge_count: new Set(nudges.map((d) => d.kind)).size, nudges_sent: nudges.length, follow_up_channels: initials.map((d) => d.channel), follow_ups_pending: followUpsPending, sendable_channels: sendable };
   }
   function publicView(q) {
     const snapshot = JSON.parse(q.snapshot_json);
@@ -134,13 +140,19 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
       fail(400, "Set a valid public website address before sending a quote.");
     return `${url.origin}/q/${q.public_token}`;
   }
+  function newUnsubscribeUrl(q, url = q.public_url) {
+    const token = randomBytes(32).toString("hex");
+    db.prepare("INSERT INTO contact_unsubscribe_links (token_hash,business_id,contact_id,created_at) VALUES (?,?,?,?)")
+      .run(createHash("sha256").update(token).digest("hex"), q.business_id, q.contact_id, stamp());
+    return `${new URL(url).origin}/q/unsubscribe/${token}`;
+  }
   function reserve(q, channel, kind, recipient, body, unsubscribe_url = null) {
     const existing = db.prepare("SELECT * FROM quote_deliveries WHERE business_id=? AND quote_id=? AND channel=? AND kind=?").get(q.business_id, q.id, channel, kind);
     if (existing) {
       // A provider rejection may be retried explicitly for the initial send.
       // Unknown outcomes, successful sends, and all follow-ups are never retried.
       if (kind !== "initial" || existing.status !== "failed") return null;
-      db.prepare("UPDATE quote_deliveries SET status='sending',recipient=?,body=?,unsubscribe_url=?,error=NULL,error_code=NULL,attempts=attempts+1,updated_at=? WHERE id=? AND status='failed'").run(recipient, body, unsubscribe_url, stamp(), existing.id);
+      db.prepare("UPDATE quote_deliveries SET status='sending',recipient=?,body=?,unsubscribe_url=?,email_bounced=0,error=NULL,error_code=NULL,attempts=attempts+1,updated_at=? WHERE id=? AND status='failed'").run(recipient, body, unsubscribe_url, stamp(), existing.id);
       return { ...existing, status: "sending", recipient, body, unsubscribe_url };
     }
     const delivery = { id: randomUUID(), business_id: q.business_id, quote_id: q.id, channel, kind, recipient, body, unsubscribe_url };
@@ -151,10 +163,18 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
   async function deliver(q, biz, delivery) {
     // Combined sends await one provider at a time. A STOP or unsubscribe may
     // arrive during that wait, so recheck before starting the next channel.
-    if (blocked(q.business_id, contact(q.business_id, q.contact_id))) {
+    const current = getQuote(q.business_id, q.id);
+    const person = contact(q.business_id, q.contact_id);
+    let stopReason = blocked(q.business_id, person) ? "This customer has opted out of messages." : null;
+    if (delivery.kind !== "initial") {
+      if (!OPEN.has(current.status) || current.follow_ups_cancelled_at) stopReason = "This quote is no longer waiting for follow-ups.";
+      else if (delivery.channel === "email" && (!validEmailAddress(person.email) || person.email.toLowerCase() !== delivery.recipient.toLowerCase() || emailBounced(q))) stopReason = "Email reminders stopped because the email address changed, is invalid, or was rejected.";
+      else if (delivery.channel === "sms" && (!person.sms_consent || person.phone !== delivery.recipient)) stopReason = "Text reminders stopped because the phone number or permission changed.";
+    }
+    if (stopReason) {
       transaction(db, () => {
-        db.prepare("UPDATE quote_deliveries SET status='skipped',error=?,updated_at=? WHERE id=?").run("This customer has opted out of messages.", stamp(), delivery.id);
-        log(q, "quote_delivery_stopped", `${q.reference} delivery stopped`, "This customer has opted out of messages.");
+        db.prepare("UPDATE quote_deliveries SET status='skipped',error=?,updated_at=? WHERE id=?").run(stopReason, stamp(), delivery.id);
+        log(q, "quote_delivery_stopped", `${q.reference} delivery stopped`, stopReason);
       });
       return false;
     }
@@ -166,7 +186,7 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
           : biz;
         result = delivery.channel === "sms"
           ? await sendSms({ ...credentialsFor(biz), to: delivery.recipient, body: delivery.body, businessId: biz.id })
-          : await sendEmail({ business: emailBusiness, to: delivery.recipient, subject: `${q.reference} from ${emailBusiness.name}`, text: delivery.body, unsubscribeUrl: delivery.unsubscribe_url });
+          : await sendEmail({ business: emailBusiness, to: delivery.recipient, subject: `${delivery.kind === "initial" ? "" : "Friendly reminder: "}${q.reference} from ${emailBusiness.name}`, text: delivery.body, unsubscribeUrl: delivery.unsubscribe_url });
         if (delivery.channel === "sms" && !result?.sid)
           throw new Error("The SMS provider did not confirm acceptance.");
         if (delivery.channel === "email" && !result?.messageId)
@@ -187,7 +207,7 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
     } catch (error) {
       const failure = delivery.channel === "sms" ? safeFailure(error) : { code: null, ...safeEmailFailure(error) };
       transaction(db, () => {
-        db.prepare("UPDATE quote_deliveries SET status=?,error_code=?,error=?,updated_at=? WHERE id=?").run(failure.uncertain ? "uncertain" : "failed", failure.code, failure.message, stamp(), delivery.id);
+        db.prepare("UPDATE quote_deliveries SET status=?,error_code=?,error=?,email_bounced=?,updated_at=? WHERE id=?").run(failure.uncertain ? "uncertain" : "failed", failure.code, failure.message, failure.bounced ? 1 : 0, stamp(), delivery.id);
         if (delivery.channel === "sms" && failure.code === 21610) optOut(q, delivery.recipient);
         log(q, "quote_delivery_failed", `${q.reference} ${delivery.kind === "initial" ? "delivery" : "follow-up"} needs attention`, failure.message);
       });
@@ -244,7 +264,7 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
     if (channels.includes("sms")) canText(biz, person);
     if (channels.includes("email")) {
       if (blocked(biz.id, person)) fail(400, "This customer has opted out of messages.");
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(person.email)) fail(400, "Add a customer email address first.");
+      if (!validEmailAddress(person.email)) fail(400, "Add a valid customer email address first.");
       if (smsMode === "twilio" && !emailReady(biz)) fail(400, "Add this business email settings before sending email.");
     }
     const url = q.public_url || buildUrl(req, q);
@@ -253,11 +273,7 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
       const reserved = [];
       for (const channel of channels) {
         let unsubscribeUrl = null;
-        if (channel === "email") {
-          const token = randomBytes(32).toString("hex");
-          db.prepare("INSERT INTO contact_unsubscribe_links (token_hash,business_id,contact_id,created_at) VALUES (?,?,?,?)").run(createHash("sha256").update(token).digest("hex"), q.business_id, q.contact_id, stamp());
-          unsubscribeUrl = `${new URL(url).origin}/q/unsubscribe/${token}`;
-        }
+        if (channel === "email") unsubscribeUrl = newUnsubscribeUrl(q, url);
         const body = channel === "sms" ? buildSms(snapshot.business, { name: snapshot.customer_name }, "quote", { url, reference: q.reference }) : buildQuoteEmailText({ businessName: snapshot.business.name, customerName: snapshot.customer_name, url, unsubscribeUrl, allowHttp: smsMode === "demo" });
         const delivery = reserve(q, channel, "initial", channel === "sms" ? person.phone : person.email, body, unsubscribeUrl);
         if (!delivery) fail(409, "This quote was already sent through that channel, or a previous delivery is still unconfirmed. Check its delivery history.");
@@ -363,6 +379,24 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
     res.json(publicView(q));
   });
 
+  function emailBounced(q) {
+    return Boolean(db.prepare("SELECT 1 FROM quote_deliveries WHERE business_id=? AND quote_id=? AND channel='email' AND email_bounced=1").get(q.business_id, q.id));
+  }
+  function cancelSequence(q, reason) {
+    const changed = db.prepare("UPDATE quotes SET follow_ups_cancelled_at=?,updated_at=? WHERE business_id=? AND id=? AND follow_ups_cancelled_at IS NULL").run(stamp(), stamp(), q.business_id, q.id);
+    if (changed.changes) log(q, "quote_follow_ups_cancelled", `${q.reference} follow-ups stopped`, reason);
+  }
+  function stopChannel(q, channel, reason, initials) {
+    let added = 0;
+    for (const kind of ["nudge_2", "nudge_5"]) {
+      added += Number(db.prepare("INSERT OR IGNORE INTO quote_deliveries (id,business_id,quote_id,channel,kind,status,error,attempts,created_at,updated_at) VALUES (?,?,?,?,?,'skipped',?,0,?,?)")
+        .run(randomUUID(), q.business_id, q.id, channel, kind, reason, stamp(), stamp()).changes);
+    }
+    if (added) log(q, "quote_channel_stopped", `${q.reference} ${channel === "email" ? "email" : "text"} reminders stopped`, reason);
+    // Preserve the single-channel cancellation behavior without stopping a
+    // valid second channel when only one recipient or permission changed.
+    if (initials.length === 1) cancelSequence(q, reason);
+  }
   async function runQuoteNudges(businessId) {
     expire(businessId);
     const candidates = db.prepare(`SELECT * FROM quotes WHERE mode=? AND status IN ('sent','viewed') AND follow_ups_cancelled_at IS NULL AND sent_at<=? ${businessId ? "AND business_id=?" : ""}`)
@@ -370,34 +404,52 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
     let sent = 0;
     let failed = 0;
     for (const candidate of candidates) {
-      const job = transaction(db, () => {
-        const q = getQuote(candidate.business_id, candidate.id);
-        if (!OPEN.has(q.status) || q.follow_ups_cancelled_at) return null;
-        const person = contact(q.business_id, q.contact_id);
-        const biz = business(q.business_id);
-        if (!person.sms_consent || blocked(q.business_id, person) || person.phone !== q.follow_up_phone) {
-          db.prepare("UPDATE quotes SET follow_ups_cancelled_at=?,updated_at=? WHERE business_id=? AND id=?").run(stamp(), stamp(), q.business_id, q.id);
-          log(q, "quote_follow_ups_cancelled", `${q.reference} follow-ups stopped`, "Text permission or the customer's phone number changed.");
-          return null;
-        }
-        if (smsMode === "twilio" && !credentialsReady(biz)) return null;
-        const age = Date.parse(stamp()) - Date.parse(q.sent_at);
-        const kind = age >= 5 * DAY ? "nudge_5" : "nudge_2";
-        if (kind === "nudge_5") {
-          // After downtime, send one current reminder rather than a burst of
-          // stale reminders. A skipped day-two reminder consumes that slot.
-          db.prepare("INSERT OR IGNORE INTO quote_deliveries (id,business_id,quote_id,channel,kind,status,created_at,updated_at) VALUES (?,?,?,'sms','nudge_2','skipped',?,?)").run(randomUUID(), q.business_id, q.id, stamp(), stamp());
-        }
-        const snapshot = JSON.parse(q.snapshot_json);
-        const body = buildSms(snapshot.business, { name: snapshot.customer_name }, "quote_nudge", { url: q.public_url, reference: q.reference });
-        const delivery = reserve(q, "sms", kind, q.follow_up_phone, body);
-        return delivery ? { q, biz, delivery } : null;
-      });
-      if (!job) continue;
-      // No await occurs between checking eligibility and reserving the send.
-      // A second worker/process sees the durable reservation and cannot resend.
-      if (await deliver(job.q, job.biz, job.delivery)) sent += 1;
-      else failed += 1;
+      for (const channel of ["sms", "email"]) {
+        const job = transaction(db, () => {
+          const q = getQuote(candidate.business_id, candidate.id);
+          if (!OPEN.has(q.status) || q.follow_ups_cancelled_at) return null;
+          const initials = initialDeliveries(q);
+          const initial = initials.find((d) => d.channel === channel);
+          if (!initial) return null;
+          const person = contact(q.business_id, q.contact_id);
+          const biz = business(q.business_id);
+          if (blocked(q.business_id, person)) {
+            cancelSequence(q, "This customer has opted out of messages.");
+            return null;
+          }
+          if (channel === "sms" && (!person.sms_consent || !PHONE_PATTERN.test(person.phone) || person.phone !== initial.recipient)) {
+            stopChannel(q, channel, "Text permission or the customer's phone number changed.", initials);
+            return null;
+          }
+          if (channel === "email" && (!validEmailAddress(person.email) || !validEmailAddress(initial.recipient) || person.email.toLowerCase() !== initial.recipient.toLowerCase() || emailBounced(q))) {
+            stopChannel(q, channel, "The customer's email address changed, is invalid, or was rejected by the email provider.", initials);
+            return null;
+          }
+          if (smsMode === "twilio" && (channel === "sms" ? !credentialsReady(biz) : !emailReady(biz))) return null;
+          const age = Date.parse(stamp()) - Date.parse(q.sent_at);
+          const kind = age >= 5 * DAY ? "nudge_5" : "nudge_2";
+          if (kind === "nudge_5") {
+            // After downtime, send one current reminder rather than a burst of
+            // stale reminders. A skipped day-two reminder consumes that slot.
+            db.prepare("INSERT OR IGNORE INTO quote_deliveries (id,business_id,quote_id,channel,kind,status,attempts,created_at,updated_at) VALUES (?,?,?,?,'nudge_2','skipped',0,?,?)").run(randomUUID(), q.business_id, q.id, channel, stamp(), stamp());
+          }
+          // Avoid generating new unsubscribe capabilities on repeated ticks once
+          // this channel's durable reminder reservation has already been taken.
+          if (db.prepare("SELECT 1 FROM quote_deliveries WHERE business_id=? AND quote_id=? AND channel=? AND kind=?").get(q.business_id, q.id, channel, kind)) return null;
+          const snapshot = JSON.parse(q.snapshot_json);
+          const unsubscribeUrl = channel === "email" ? initial.unsubscribe_url || newUnsubscribeUrl(q) : null;
+          const body = channel === "sms"
+            ? buildSms(snapshot.business, { name: snapshot.customer_name }, "quote_nudge", { url: q.public_url, reference: q.reference })
+            : buildQuoteEmailText({ businessName: snapshot.business.name, customerName: snapshot.customer_name, url: q.public_url, unsubscribeUrl, kind: "quote_nudge", allowHttp: smsMode === "demo" });
+          const delivery = reserve(q, channel, kind, initial.recipient, body, unsubscribeUrl);
+          return delivery ? { q, biz, delivery } : null;
+        });
+        if (!job) continue;
+        // Recheck status, permission and each channel after provider I/O. The
+        // database's channel/kind uniqueness also protects concurrent workers.
+        if (await deliver(job.q, job.biz, job.delivery)) sent += 1;
+        else failed += 1;
+      }
     }
     return { sent, failed };
   }

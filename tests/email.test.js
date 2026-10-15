@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import nodemailer from "nodemailer";
-import { buildQuoteEmailText, emailReady, emailTransport, safeEmailFailure } from "../src/email.js";
+import { buildQuoteEmailText, emailReady, emailTransport, safeEmailFailure, validEmailAddress } from "../src/email.js";
 
 const BUSINESS = { id: "business-alpha", name: "Alpha Plumbing", sms_key: "ALPHA" };
 const RECIPIENT = "customer@example.test";
@@ -87,6 +87,27 @@ test("quote email includes a visible unsubscribe footer once and real one-click 
   assert.equal(raw.includes(SETTINGS.PASSWORD), false);
 });
 
+test("quote reminders use a polite message and retain one-click unsubscribe headers and footer", async (t) => {
+  configure(t);
+  const text = buildQuoteEmailText({ businessName: BUSINESS.name, customerName: "Jamie Customer", url: "https://quotes.example.test/q/synthetic-link", unsubscribeUrl: UNSUBSCRIBE_URL, kind: "quote_nudge" });
+  assert.match(text, /^Hi Jamie,\n\nJust checking in on your quote from Alpha Plumbing\./);
+  assert.match(text, /You can view it and accept or decline here:\nhttps:\/\/quotes\.example\.test\/q\/synthetic-link/);
+  assert.ok(text.endsWith(`Stop quote emails and texts from ${BUSINESS.name}: ${UNSUBSCRIBE_URL}`));
+  await emailTransport(message({ text, createTransport() {
+    return { async sendMail(payload) {
+      assert.equal(payload.text, text);
+      assert.equal((payload.text.match(/Stop quote emails and texts from/g) || []).length, 1);
+      assert.deepEqual(payload.headers, { "List-Unsubscribe": `<${UNSUBSCRIBE_URL}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" });
+      return { accepted: [RECIPIENT], messageId: "synthetic-reminder-id" };
+    } };
+  } }));
+});
+
+test("the email validator accepts a single mailbox and rejects invalid or injected recipients", () => {
+  for (const address of [RECIPIENT, "Customer+quotes@EXAMPLE.test"]) assert.equal(validEmailAddress(address), true);
+  for (const address of [undefined, null, "", "not-an-email", "customer@localhost", "one@example.test,two@example.test", "Customer <customer@example.test>", "customer@example.test\r\nBcc: hidden@example.test"]) assert.equal(validEmailAddress(address), false);
+});
+
 test("a valid HTTPS unsubscribe link is required before sending an email", async (t) => {
   configure(t);
   for (const unsubscribeUrl of [undefined, "", "not a URL", "http://quotes.example.test/unsubscribe/link", "https://user:password@quotes.example.test/unsubscribe/link", "https://quotes.example.test/unsubscribe/link#fragment", "https://quotes.example.test/unsubscribe/link\r\nBcc: hidden@example.test", "https://quotes.example.test/unsubscribe/%0d%0alink", "https://quotes.example.test/unsubscribe/link><mailto:hidden@example.test>"]) {
@@ -125,6 +146,43 @@ test("a rejected recipient cannot become a successful email send", async (t) => 
     return { async sendMail() { return { accepted: [], rejected: [RECIPIENT] }; }, close() { closed = true; } };
   } })), { code: "EEMAILREJECTED" });
   assert.equal(closed, true);
+});
+
+test("permanent recipient rejection stops email follow-ups without treating settings or transient errors as bounces", () => {
+  for (const responseCode of [550, 551, 552, 553, 554]) {
+    const failure = safeEmailFailure({ code: "EENVELOPE", command: "RCPT TO", responseCode, message: "private SMTP trace", response: "private recipient details" });
+    assert.equal(failure.uncertain, false);
+    assert.equal(failure.bounced, true);
+    assert.equal(JSON.stringify(failure).includes("private"), false);
+  }
+  assert.equal(safeEmailFailure({ code: "EEMAILREJECTED" }).bounced, true);
+  for (const error of [
+    { code: "EAUTH", responseCode: 535 },
+    { code: "EEMAILCONFIG" },
+    { code: "EEMAILINPUT" },
+    { code: "EEMAILREJECTED", responseCode: 450 },
+    { code: "ETIMEDOUT" },
+    { code: "EENVELOPE", command: "RCPT TO", responseCode: 450 },
+    { code: "EENVELOPE", command: "RCPT TO", responseCode: 530 },
+    { code: "EENVELOPE", command: "MAIL FROM", responseCode: 550 },
+    { code: "EMESSAGE", command: "DATA", responseCode: 554 },
+    { responseCode: 550 },
+  ]) assert.equal(safeEmailFailure(error).bounced, false);
+});
+
+test("a transport's temporary rejected recipient is not recorded as a permanent bounce", async (t) => {
+  configure(t);
+  for (const [responseCode, bounced] of [[450, false], [550, true]]) {
+    await assert.rejects(emailTransport(message({ createTransport() {
+      return { async sendMail() { return { accepted: [], rejected: [RECIPIENT], rejectedErrors: [{ recipient: RECIPIENT, command: "RCPT TO", responseCode }] }; } };
+    } })), (error) => {
+      assert.equal(error.code, "EEMAILREJECTED");
+      const failure = safeEmailFailure(error);
+      assert.equal(failure.uncertain, false);
+      assert.equal(failure.bounced, bounced);
+      return true;
+    });
+  }
 });
 
 test("a timeout is not retried and uncertain failure guidance excludes provider details", async (t) => {

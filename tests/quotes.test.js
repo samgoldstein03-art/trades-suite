@@ -78,7 +78,7 @@ test("quotes use existing customers and composite business isolation with exact 
   assert.equal((await f.req("POST", f.base("BETA"), { ...q, contact_id: "ALPHA-customer" })).status, 404);
   assert.throws(() => f.db.prepare("UPDATE quotes SET contact_id='BETA-customer' WHERE id=?").run(q.id), /FOREIGN KEY/);
   assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM activity WHERE business_id='BETA'").get().n, 0);
-  assert.equal(f.db.prepare("PRAGMA user_version").get().user_version, 3);
+  assert.equal(f.db.prepare("PRAGMA user_version").get().user_version, 4);
 });
 
 test("quote validation rejects unsafe money, malformed dates and customer records", async (t) => {
@@ -263,7 +263,7 @@ test("failed follow-ups remain in delivery history and consume only their schedu
   assert.equal(shown.status, "sent");
 });
 
-test("email-only quote sending does not require SMS consent and never nudges without it", async (t) => {
+test("email-only quotes do not send SMS reminders without text permission", async (t) => {
   const f = fixture(t); f.db.prepare("UPDATE contacts SET sms_consent=0 WHERE id='ALPHA-customer'").run();
   const q = (await f.send(await f.create(), ["email"])).data;
   assert.equal(q.status, "sent"); assert.equal(f.email.length, 1); assert.equal(f.sms.length, 0);

@@ -62,6 +62,59 @@ test("browser quote reminders run at two and five days once, and cancellation st
   assert.equal((await api(`${base}/quotes/demo/advance`, post({ days: 5 }))).sent, 0);
 });
 
+test("browser quote reminders follow only the original channels once at each scheduled time", async (t) => {
+  for (const channels of [["email"], ["sms"], ["sms", "email"]]) await t.test(channels.join(" and "), async () => {
+    const saved = storage();
+    const api = createBrowserDemo(saved);
+    const [business] = await api("/api/businesses");
+    const base = `/api/businesses/${business.id}`;
+    const customer = (await api(`${base}/contacts`))[0];
+    if (!channels.includes("sms")) await api(`${base}/contacts/${customer.id}`, { method: "PATCH", body: JSON.stringify({ sms_consent: false }) });
+    const draft = await draftQuote(api, base, customer);
+    await api(`${base}/quotes/${draft.id}/send`, post({ channels }));
+    assert.equal((await api(`${base}/quotes/demo/advance`, post({ days: 2 }))).sent, channels.length);
+    const day2 = await api(`${base}/quotes/${draft.id}`);
+    assert.equal(day2.nudge_count, 1, "one scheduled round may contain two deliveries");
+    assert.equal(day2.nudges_sent, channels.length);
+    assert.equal(day2.follow_ups_pending, true);
+    assert.deepEqual(day2.follow_up_channels, channels);
+    assert.equal((await api(`${base}/quotes/${draft.id}`)).deliveries.length, channels.length * 2);
+    const reloaded = createBrowserDemo(saved);
+    assert.equal((await reloaded(`${base}/quotes/demo/advance`, post({ days: 3 }))).sent, channels.length);
+    assert.equal((await reloaded(`${base}/quotes/demo/advance`, post({ days: 5 }))).sent, 0);
+    const complete = await reloaded(`${base}/quotes/${draft.id}`);
+    assert.equal(complete.nudge_count, 2);
+    assert.equal(complete.nudges_sent, channels.length * 2);
+    assert.equal(complete.follow_ups_pending, false);
+    for (const channel of ["sms", "email"]) for (const kind of ["nudge_2", "nudge_5"]) {
+      assert.equal(complete.deliveries.filter((delivery) => delivery.channel === channel && delivery.kind === kind).length, channels.includes(channel) ? 1 : 0);
+    }
+    for (const email of complete.deliveries.filter((delivery) => delivery.channel === "email")) {
+      assert.match(email.headers["List-Unsubscribe"], /#unsubscribe\//);
+      assert.equal(email.headers["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
+    }
+    const emailMessages = (await reloaded(`${base}/activity`)).filter((entry) => entry.quote_id === draft.id && entry.kind === "email_sent");
+    assert.equal(emailMessages.length, channels.includes("email") ? 3 : 0);
+    assert.ok(emailMessages.every((entry) => entry.body.includes("\nUnsubscribe: ")));
+  });
+});
+
+test("browser email reminders stop for changed addresses while the original text sequence continues", async () => {
+  const api = createBrowserDemo(storage());
+  const [business] = await api("/api/businesses");
+  const base = `/api/businesses/${business.id}`;
+  const customer = (await api(`${base}/contacts`))[0];
+  const draft = await draftQuote(api, base, customer);
+  await api(`${base}/quotes/${draft.id}/send`, post({ channels: ["sms", "email"] }));
+  await api(`${base}/contacts/${customer.id}`, { method: "PATCH", body: JSON.stringify({ email: "new-address@example.com" }) });
+  assert.equal((await api(`${base}/quotes/demo/advance`, post({ days: 2 }))).sent, 1);
+  await api(`${base}/contacts/${customer.id}`, { method: "PATCH", body: JSON.stringify({ email: customer.email }) });
+  assert.equal((await api(`${base}/quotes/demo/advance`, post({ days: 3 }))).sent, 1);
+  const complete = await api(`${base}/quotes/${draft.id}`);
+  assert.equal(complete.deliveries.filter((delivery) => delivery.channel === "email" && delivery.kind !== "initial" && delivery.status === "simulated").length, 0);
+  assert.equal(complete.deliveries.filter((delivery) => delivery.channel === "sms" && delivery.kind !== "initial" && delivery.status === "simulated").length, 2);
+});
+
 test("browser quotes skip stale reminders after downtime and do not expose unsent drafts", async () => {
   const saved = storage();
   const api = createBrowserDemo(saved);

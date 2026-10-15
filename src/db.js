@@ -154,6 +154,8 @@ export function openDatabase(dbPath) {
     db.exec("ALTER TABLE contacts ADD COLUMN quote_email_opted_out INTEGER NOT NULL DEFAULT 0 CHECK(quote_email_opted_out IN (0,1))");
   if (!db.prepare("PRAGMA table_info(quote_deliveries)").all().some((column) => column.name === "unsubscribe_url"))
     db.exec("ALTER TABLE quote_deliveries ADD COLUMN unsubscribe_url TEXT");
+  if (!db.prepare("PRAGMA table_info(quote_deliveries)").all().some((column) => column.name === "email_bounced"))
+    db.exec("ALTER TABLE quote_deliveries ADD COLUMN email_bounced INTEGER NOT NULL DEFAULT 0 CHECK(email_bounced IN (0,1))");
   // Capabilities are scoped to a contact, independent of any quote's lifetime.
   // Store only their hashes; old email links continue to work after expiry.
   db.exec(`CREATE TABLE IF NOT EXISTS contact_unsubscribe_links (
@@ -162,7 +164,7 @@ export function openDatabase(dbPath) {
     contact_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY(business_id,contact_id) REFERENCES contacts(business_id,id)
-  ); PRAGMA user_version = 3;`);
+  ); PRAGMA user_version = 4;`);
   return db;
 }
 

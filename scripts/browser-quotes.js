@@ -7,6 +7,8 @@ export function createBrowserQuotes({ getData, id, now, log }) {
   const customer = (q) => getData().contacts.find((c) => c.business_id === q.business_id && c.id === q.contact_id);
   const business = (q) => getData().businesses.find((b) => b.id === q.business_id);
   const optedOut = (c) => Boolean(c.opted_out || c.quote_email_opted_out);
+  const confirmed = (delivery) => ["sent", "simulated"].includes(delivery.status);
+  const initialDelivery = (q, channel) => q.deliveries.find((delivery) => delivery.kind === "initial" && delivery.channel === channel && confirmed(delivery));
   const unsubscribeTokens = () => getData().email_unsubscribe_tokens ||= [];
   const demoBase = () => typeof location === "undefined" ? "https://demo.example.test/" : location.href.split("#")[0];
   function unsubscribeLink(q) {
@@ -42,15 +44,18 @@ export function createBrowserQuotes({ getData, id, now, log }) {
   }
   function view(q) {
     const { token, snapshot, follow_up_phone, ...visible } = q;
-    const nudges = q.deliveries.filter((d) => d.kind !== "initial" && d.status === "simulated").length;
-    return { ...visible, contact_name: snapshot?.customer_name || customer(q).name, nudge_count: nudges, nudges_sent: nudges, sendable_channels: ["draft", "sent", "viewed"].includes(q.status) ? ["sms", "email"].filter((channel) => !q.deliveries.some((d) => d.channel === channel && d.kind === "initial")) : [] };
+    const nudges = q.deliveries.filter((d) => ["nudge_2", "nudge_5"].includes(d.kind) && confirmed(d));
+    const follow_up_channels = ["sms", "email"].filter((channel) => initialDelivery(q, channel));
+    const follow_ups_pending = open(q) && !q.follow_ups_cancelled_at && !optedOut(customer(q)) && follow_up_channels.some((channel) => !q.deliveries.some((delivery) => delivery.channel === channel && delivery.kind === "nudge_5"));
+    return { ...visible, contact_name: snapshot?.customer_name || customer(q).name, nudge_count: new Set(nudges.map((d) => d.kind)).size, nudges_sent: nudges.length, follow_up_channels, follow_ups_pending, sendable_channels: ["draft", "sent", "viewed"].includes(q.status) ? ["sms", "email"].filter((channel) => !q.deliveries.some((d) => d.channel === channel && d.kind === "initial")) : [] };
   }
   function publicView(q) {
     return { reference: q.reference, status: q.status, mode: "demo", business: q.snapshot.business, customer_name: q.snapshot.customer_name, contact_name: q.snapshot.customer_name, line_items: q.line_items, tax_rate: q.tax_rate, subtotal_cents: q.subtotal_cents, tax_cents: q.tax_cents, total_cents: q.total_cents, currency: q.currency, expiry_date: q.expiry_date, notes: q.notes, can_respond: open(q) };
   }
   function deliver(q, channel, kind) {
     const unsubscribeUrl = channel === "email" ? unsubscribeLink(q) : null;
-    q.deliveries.push({ id: id(), channel, kind, status: "simulated", attempts: 1, created_at: now(), updated_at: now(), ...(unsubscribeUrl ? { headers: { "List-Unsubscribe": `<${unsubscribeUrl}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" } } : {}) });
+    const c = customer(q);
+    q.deliveries.push({ id: id(), channel, kind, recipient: channel === "email" ? c.email : c.phone, status: "simulated", attempts: 1, created_at: now(), updated_at: now(), ...(unsubscribeUrl ? { headers: { "List-Unsubscribe": `<${unsubscribeUrl}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" } } : {}) });
     const name = q.snapshot.business.name;
     const body = `Hi ${q.snapshot.customer_name.split(/\s+/)[0]}, ${kind === "initial" ? "your quote is ready" : "just a gentle reminder about your quote"}: ${q.public_url}\n\n${name}${channel === "sms" ? "\nReply STOP to opt out" : `\nUnsubscribe: ${unsubscribeUrl}`}`;
     activity(q, channel === "sms" ? "sms_sent" : "email_sent", `${kind === "initial" ? "link" : "follow-up"} simulated by ${channel === "sms" ? "text" : "email"}`, body);
@@ -62,12 +67,26 @@ export function createBrowserQuotes({ getData, id, now, log }) {
       if (["draft", "sent", "viewed"].includes(q.status) && q.expiry_date < now().slice(0, 10)) status(q, "expired");
       if (!open(q) || q.follow_ups_cancelled_at || Date.parse(now()) - Date.parse(q.sent_at) < 2 * day) continue;
       const c = customer(q);
-      if (!c.sms_consent || optedOut(c) || c.phone !== q.follow_up_phone) {
-        q.follow_ups_cancelled_at = now(); activity(q, "quote_follow_ups_cancelled", "follow-ups stopped", "Text permission or the customer's phone number changed."); continue;
+      if (optedOut(c)) {
+        q.follow_ups_cancelled_at = now(); activity(q, "quote_follow_ups_cancelled", "follow-ups stopped", "The customer opted out of messages."); continue;
       }
       const kind = Date.parse(now()) - Date.parse(q.sent_at) >= 5 * day ? "nudge_5" : "nudge_2";
-      if (kind === "nudge_5" && !q.deliveries.some((d) => d.kind === "nudge_2")) q.deliveries.push({ id: id(), channel: "sms", kind: "nudge_2", status: "skipped", attempts: 0, created_at: now(), updated_at: now() });
-      if (!q.deliveries.some((d) => d.kind === kind)) { deliver(q, "sms", kind); sent++; }
+      for (const channel of ["sms", "email"]) {
+        const initial = initialDelivery(q, channel);
+        if (!initial) continue;
+        if (kind === "nudge_5" && !q.deliveries.some((d) => d.channel === channel && d.kind === "nudge_2")) q.deliveries.push({ id: id(), channel, kind: "nudge_2", status: "skipped", attempts: 0, created_at: now(), updated_at: now() });
+        if (q.deliveries.some((d) => d.channel === channel && d.kind === kind)) continue;
+        const original = initial.recipient || (channel === "sms" ? q.follow_up_phone : c.email);
+        const stopped = q.deliveries.some((d) => d.channel === channel && d.kind !== "initial" && d.status === "skipped" && d.error);
+        const invalid = channel === "sms" ? !c.sms_consent || c.phone !== original : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email) || c.email.toLowerCase() !== original.toLowerCase();
+        if (stopped || invalid) {
+          const error = channel === "sms" ? "Text permission or the customer's phone number changed." : "The customer's email address is invalid or has changed.";
+          q.deliveries.push({ id: id(), channel, kind, recipient: original, status: "skipped", error, attempts: 0, created_at: now(), updated_at: now() });
+          activity(q, "quote_follow_up_skipped", `${channel === "sms" ? "text" : "email"} follow-up stopped`, error);
+          continue;
+        }
+        deliver(q, channel, kind); sent++;
+      }
     }
     return { sent, failed: 0 };
   }

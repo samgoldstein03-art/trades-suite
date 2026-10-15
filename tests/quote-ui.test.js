@@ -33,6 +33,46 @@ test("quote lists and dashboard show scoped data, statuses, totals and escaped c
   assert.equal(new Script('quoteFollowUpText({status:"sent", nudge_count:0, follow_ups_cancelled_at:"2026-10-10"})').runInContext(context), "Reminders stopped");
 });
 
+test("day-2 reminders on both channels count as one round and leave the owner's stop control available", async () => {
+  const content = { innerHTML: "" };
+  const context = adminContext({ document: { querySelector: (selector) => ({ "#modal-content": content, "#modal": { showModal() {} } })[selector] } });
+  new Script(`state.quotes[0].nudge_count = 1;
+    state.quotes[0].nudges_sent = 2;
+    state.quotes[0].follow_up_channels = ["sms", "email"];
+    state.quotes[0].follow_ups_pending = true;
+    state.quotes[0].deliveries = ["sms", "email"].flatMap(channel => [
+      {channel, kind:"initial", status:"sent"}, {channel, kind:"nudge_2", status:"sent"}
+    ]);
+    api = async () => state.quotes[0];`).runInContext(context);
+  await new Script('quoteDetail("q1");').runInContext(context);
+  assert.match(content.innerHTML, /Final reminder at day 5/);
+  assert.match(content.innerHTML, /Reminders by text and email/);
+  assert.match(content.innerHTML, /data-action="cancel-quote-followups"/);
+  assert.ok(!content.innerHTML.includes("Both reminders sent"));
+
+  new Script(`delete state.quotes[0].nudge_count; delete state.quotes[0].follow_ups_pending;`).runInContext(context);
+  await new Script('quoteDetail("q1");').runInContext(context);
+  assert.match(content.innerHTML, /Final reminder at day 5/, "delivery fallback also counts distinct rounds");
+  assert.match(content.innerHTML, /data-action="cancel-quote-followups"/);
+
+  new Script(`state.quotes[0].deliveries.push(...["sms", "email"].map(channel => ({channel,kind:"nudge_5",status:"sent"})));`).runInContext(context);
+  await new Script('quoteDetail("q1");').runInContext(context);
+  assert.match(content.innerHTML, /Both reminders sent/);
+  assert.ok(!content.innerHTML.includes('data-action="cancel-quote-followups"'));
+});
+
+test("a waiting email reminder keeps the stop control after both text reminders were sent", async () => {
+  const content = { innerHTML: "" };
+  const context = adminContext({ document: { querySelector: (selector) => ({ "#modal-content": content, "#modal": { showModal() {} } })[selector] } });
+  new Script(`state.quotes[0] = { ...state.quotes[0], nudge_count:2, nudges_sent:2,
+    follow_up_channels:["sms","email"], follow_ups_pending:true,
+    deliveries:[{channel:"sms",kind:"nudge_2",status:"sent"},{channel:"sms",kind:"nudge_5",status:"sent"}] };
+    api = async () => state.quotes[0];`).runInContext(context);
+  await new Script('quoteDetail("q1");').runInContext(context);
+  assert.match(content.innerHTML, /Some reminders still waiting/);
+  assert.match(content.innerHTML, /data-action="cancel-quote-followups"/);
+});
+
 test("draft payload captures selected customer, fractional quantity, dollars, tax and notes", () => {
   const values = { "#quote-contact-id": { value: "c2" }, "#quote-tax-rate": { value: "13" }, "#quote-expiry-date": { value: "2027-01-31" }, "#quote-notes": { value: "Call before arrival" } };
   const row = { querySelector: (selector) => ({ '[data-line="description"]': { value: "Repair" }, '[data-line="quantity"]': { value: "1.5" }, '[data-line="unit_price"]': { value: "10.15" } })[selector] };

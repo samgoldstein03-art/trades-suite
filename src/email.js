@@ -4,7 +4,7 @@ const HEADER_CONTROLS = /[\u0000-\u001f\u007f]/;
 const EMAIL_ADDRESS = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/;
 const SMTP_HOST = /^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*$/;
 
-function validAddress(value) {
+export function validEmailAddress(value) {
   return typeof value === "string" && value.length <= 254 &&
     !HEADER_CONTROLS.test(value) && EMAIL_ADDRESS.test(value);
 }
@@ -19,7 +19,7 @@ function emailConfiguration(business) {
   const from = process.env[`${prefix}FROM`] || "";
   if (!SMTP_HOST.test(host) || ![465, 587].includes(port) ||
       !user || !password || HEADER_CONTROLS.test(user) ||
-      HEADER_CONTROLS.test(password) || !validAddress(from)) return null;
+      HEADER_CONTROLS.test(password) || !validEmailAddress(from)) return null;
   return { host, port, user, password, from };
 }
 
@@ -57,13 +57,16 @@ function quoteEmailFooter(businessName, unsubscribeUrl, allowHttp = false) {
 }
 
 // Keep the stored Activity message identical to the email delivered by SMTP.
-export function buildQuoteEmailText({ businessName, customerName, url, unsubscribeUrl, allowHttp = false }) {
+export function buildQuoteEmailText({ businessName, customerName, url, unsubscribeUrl, allowHttp = false, kind = "quote" }) {
   if (typeof customerName !== "string" || !customerName.trim() ||
       HEADER_CONTROLS.test(customerName) || typeof url !== "string" || !url ||
       HEADER_CONTROLS.test(url)) {
     throw localFailure("EEMAILINPUT", "Email details are invalid.");
   }
-  return `Hi ${customerName.trim().split(/\s+/)[0]},\n\nYour quote from ${businessName} is ready. View it and accept or decline here:\n${url}\n\n${businessName}\n\n${quoteEmailFooter(businessName, unsubscribeUrl, allowHttp)}`;
+  const message = kind === "quote_nudge"
+    ? `Just checking in on your quote from ${businessName}. You can view it and accept or decline here:`
+    : `Your quote from ${businessName} is ready. View it and accept or decline here:`;
+  return `Hi ${customerName.trim().split(/\s+/)[0]},\n\n${message}\n${url}\n\n${businessName}\n\n${quoteEmailFooter(businessName, unsubscribeUrl, allowHttp)}`;
 }
 
 // The optional factory is for tests. SMTP settings are always server-side env.
@@ -77,7 +80,7 @@ export async function emailTransport({
 }) {
   const config = emailConfiguration(business);
   if (!config) throw localFailure("EEMAILCONFIG", "Email settings are incomplete.");
-  if (!validAddress(to) || typeof subject !== "string" || !subject ||
+  if (!validEmailAddress(to) || typeof subject !== "string" || !subject ||
       subject.length > 200 || HEADER_CONTROLS.test(subject) ||
       typeof text !== "string" || !text || text.length > 100000 ||
       typeof business.name !== "string" || HEADER_CONTROLS.test(business.name)) {
@@ -122,7 +125,16 @@ export async function emailTransport({
     const accepted = result?.accepted?.some((address) =>
       typeof address === "string" && address.toLowerCase() === to.toLowerCase());
     if (!accepted) {
-      throw localFailure("EEMAILREJECTED", "The email provider rejected this recipient.");
+      const failure = localFailure("EEMAILREJECTED", "The email provider rejected this recipient.");
+      const rejected = result?.rejected?.some((address) =>
+        typeof address === "string" && address.toLowerCase() === to.toLowerCase());
+      // Nodemailer normally throws SMTP rejection errors. Preserve the same
+      // distinction for transports that instead return rejected recipient data.
+      const recipientErrors = (Array.isArray(result?.rejectedErrors) ? result.rejectedErrors : []).filter((error) =>
+        !error.recipient || String(error.recipient).toLowerCase() === to.toLowerCase());
+      failure.bounced = Boolean(rejected) && (recipientErrors.length === 0 ||
+        recipientErrors.every(permanentRecipientRejection));
+      throw failure;
     }
     return { messageId: result.messageId || null, accepted: [to] };
   } finally {
@@ -130,20 +142,28 @@ export async function emailTransport({
   }
 }
 
+function permanentRecipientRejection(error) {
+  const command = typeof error?.command === "string" ? error.command.trim().toUpperCase() : "";
+  return command === "RCPT TO" && [550, 551, 552, 553, 554].includes(Number(error?.responseCode));
+}
+
 // Do not copy upstream messages or SMTP responses: they can contain secrets.
 export function safeEmailFailure(error) {
   const code = error?.code;
   if (code === "EEMAILCONFIG" || code === "EAUTH") {
-    return { uncertain: false, message: "Email could not sign in for this business. Check its email settings on the server." };
+    return { uncertain: false, bounced: false, message: "Email could not sign in for this business. Check its email settings on the server." };
   }
   if (code === "EEMAILINPUT") {
-    return { uncertain: false, message: "Check the customer's email address and this business's email settings." };
+    return { uncertain: false, bounced: false, message: "Check the customer's email address and this business's email settings." };
   }
   const responseCode = Number(error?.responseCode);
   const uncertain = code !== "EEMAILREJECTED" &&
     !(Number.isInteger(responseCode) && responseCode >= 400 && responseCode <= 599);
   return {
     uncertain,
+    bounced: code === "EEMAILREJECTED"
+      ? error.bounced !== false && !(responseCode >= 400 && responseCode < 500)
+      : permanentRecipientRejection(error),
     message: uncertain
       ? "The email provider did not confirm this message. Check its sent-message log before trying again; it may have been sent."
       : "The email provider could not send this message. Check the customer's email address and this business's email settings.",
