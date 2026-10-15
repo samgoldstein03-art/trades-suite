@@ -1,10 +1,11 @@
 import express from "express";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import multer from "multer";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { transaction } from "./db.js";
 import { buildSms, credentialsFor, credentialsReady, PHONE_PATTERN, safeFailure } from "./sms.js";
-import { safeEmailFailure } from "./email.js";
+import { buildQuoteEmailText, safeEmailFailure } from "./email.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DAY = 86400000;
@@ -95,7 +96,7 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
     const sends = deliveries(q);
     const nudges = sends.filter((d) => d.kind !== "initial" && ["sent", "simulated"].includes(d.status)).length;
     const { public_token, snapshot_json, follow_up_phone, ...visible } = q;
-    const sendable = ["draft", "sent", "viewed"].includes(q.status) ? ["sms", "email"].filter((channel) => {
+    const sendable = ["draft", "sent", "viewed"].includes(q.status) && !blocked(q.business_id, contact(q.business_id, q.contact_id)) ? ["sms", "email"].filter((channel) => {
       const attempt = sends.find((d) => d.channel === channel && d.kind === "initial");
       return !attempt || attempt.status === "failed";
     }) : [];
@@ -112,7 +113,7 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
     return getQuote(found.business_id, found.id);
   }
   function blocked(businessId, person) {
-    return Boolean(person.opted_out || db.prepare("SELECT 1 FROM phone_opt_outs WHERE business_id=? AND phone=?").get(businessId, person.phone));
+    return Boolean(person.opted_out || person.quote_email_opted_out || db.prepare("SELECT 1 FROM phone_opt_outs WHERE business_id=? AND phone=?").get(businessId, person.phone));
   }
   function canText(biz, person) {
     if (!person.sms_consent) fail(400, "Confirm this customer has agreed to receive texts.");
@@ -133,27 +134,39 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
       fail(400, "Set a valid public website address before sending a quote.");
     return `${url.origin}/q/${q.public_token}`;
   }
-  function reserve(q, channel, kind, recipient, body) {
+  function reserve(q, channel, kind, recipient, body, unsubscribe_url = null) {
     const existing = db.prepare("SELECT * FROM quote_deliveries WHERE business_id=? AND quote_id=? AND channel=? AND kind=?").get(q.business_id, q.id, channel, kind);
     if (existing) {
       // A provider rejection may be retried explicitly for the initial send.
       // Unknown outcomes, successful sends, and all follow-ups are never retried.
       if (kind !== "initial" || existing.status !== "failed") return null;
-      db.prepare("UPDATE quote_deliveries SET status='sending',recipient=?,body=?,error=NULL,error_code=NULL,attempts=attempts+1,updated_at=? WHERE id=? AND status='failed'").run(recipient, body, stamp(), existing.id);
-      return { ...existing, status: "sending", recipient, body };
+      db.prepare("UPDATE quote_deliveries SET status='sending',recipient=?,body=?,unsubscribe_url=?,error=NULL,error_code=NULL,attempts=attempts+1,updated_at=? WHERE id=? AND status='failed'").run(recipient, body, unsubscribe_url, stamp(), existing.id);
+      return { ...existing, status: "sending", recipient, body, unsubscribe_url };
     }
-    const delivery = { id: randomUUID(), business_id: q.business_id, quote_id: q.id, channel, kind, recipient, body };
-    db.prepare("INSERT INTO quote_deliveries (id,business_id,quote_id,channel,kind,status,recipient,body,created_at,updated_at) VALUES (?,?,?,?,?,'sending',?,?,?,?)")
-      .run(delivery.id, q.business_id, q.id, channel, kind, recipient, body, stamp(), stamp());
+    const delivery = { id: randomUUID(), business_id: q.business_id, quote_id: q.id, channel, kind, recipient, body, unsubscribe_url };
+    db.prepare("INSERT INTO quote_deliveries (id,business_id,quote_id,channel,kind,status,recipient,body,unsubscribe_url,created_at,updated_at) VALUES (?,?,?,?,?,'sending',?,?,?,?,?)")
+      .run(delivery.id, q.business_id, q.id, channel, kind, recipient, body, unsubscribe_url, stamp(), stamp());
     return delivery;
   }
   async function deliver(q, biz, delivery) {
+    // Combined sends await one provider at a time. A STOP or unsubscribe may
+    // arrive during that wait, so recheck before starting the next channel.
+    if (blocked(q.business_id, contact(q.business_id, q.contact_id))) {
+      transaction(db, () => {
+        db.prepare("UPDATE quote_deliveries SET status='skipped',error=?,updated_at=? WHERE id=?").run("This customer has opted out of messages.", stamp(), delivery.id);
+        log(q, "quote_delivery_stopped", `${q.reference} delivery stopped`, "This customer has opted out of messages.");
+      });
+      return false;
+    }
     try {
       let result;
       if (smsMode === "twilio") {
+        const emailBusiness = delivery.channel === "email"
+          ? { ...biz, name: JSON.parse(db.prepare("SELECT snapshot_json FROM quotes WHERE business_id=? AND id=?").get(q.business_id, q.id).snapshot_json).business.name }
+          : biz;
         result = delivery.channel === "sms"
           ? await sendSms({ ...credentialsFor(biz), to: delivery.recipient, body: delivery.body, businessId: biz.id })
-          : await sendEmail({ business: biz, to: delivery.recipient, subject: `${q.reference} from ${biz.name}`, text: delivery.body });
+          : await sendEmail({ business: emailBusiness, to: delivery.recipient, subject: `${q.reference} from ${emailBusiness.name}`, text: delivery.body, unsubscribeUrl: delivery.unsubscribe_url });
         if (delivery.channel === "sms" && !result?.sid)
           throw new Error("The SMS provider did not confirm acceptance.");
         if (delivery.channel === "email" && !result?.messageId)
@@ -230,6 +243,7 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
     const person = contact(q.business_id, q.contact_id);
     if (channels.includes("sms")) canText(biz, person);
     if (channels.includes("email")) {
+      if (blocked(biz.id, person)) fail(400, "This customer has opted out of messages.");
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(person.email)) fail(400, "Add a customer email address first.");
       if (smsMode === "twilio" && !emailReady(biz)) fail(400, "Add this business email settings before sending email.");
     }
@@ -238,8 +252,14 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
     const jobs = transaction(db, () => {
       const reserved = [];
       for (const channel of channels) {
-        const body = channel === "sms" ? buildSms(snapshot.business, { name: snapshot.customer_name }, "quote", { url, reference: q.reference }) : `Hi ${snapshot.customer_name.split(/\s+/)[0]},\n\nYour quote from ${snapshot.business.name} is ready. View it and accept or decline here:\n${url}\n\n${snapshot.business.name}`;
-        const delivery = reserve(q, channel, "initial", channel === "sms" ? person.phone : person.email, body);
+        let unsubscribeUrl = null;
+        if (channel === "email") {
+          const token = randomBytes(32).toString("hex");
+          db.prepare("INSERT INTO contact_unsubscribe_links (token_hash,business_id,contact_id,created_at) VALUES (?,?,?,?)").run(createHash("sha256").update(token).digest("hex"), q.business_id, q.contact_id, stamp());
+          unsubscribeUrl = `${new URL(url).origin}/q/unsubscribe/${token}`;
+        }
+        const body = channel === "sms" ? buildSms(snapshot.business, { name: snapshot.customer_name }, "quote", { url, reference: q.reference }) : buildQuoteEmailText({ businessName: snapshot.business.name, customerName: snapshot.customer_name, url, unsubscribeUrl, allowHttp: smsMode === "demo" });
+        const delivery = reserve(q, channel, "initial", channel === "sms" ? person.phone : person.email, body, unsubscribeUrl);
         if (!delivery) fail(409, "This quote was already sent through that channel, or a previous delivery is still unconfirmed. Check its delivery history.");
         reserved.push(delivery);
       }
@@ -261,6 +281,47 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
   });
 
   publicRouter.use((req, res, next) => { res.set({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex, nofollow" }); next(); });
+  function unsubscribeContact(token) {
+    if (!/^[a-f0-9]{64}$/.test(token)) fail(404, "This unsubscribe link was not found.");
+    const person = db.prepare(`SELECT c.*, b.name AS unsubscribe_business_name
+      FROM contact_unsubscribe_links l
+      JOIN contacts c ON c.business_id=l.business_id AND c.id=l.contact_id
+      JOIN businesses b ON b.id=c.business_id WHERE l.token_hash=?`)
+      .get(createHash("sha256").update(token).digest("hex"));
+    if (!person) fail(404, "This unsubscribe link was not found.");
+    return person;
+  }
+  function unsubscribePage(person, token) {
+    const escape = (value) => String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+    const name = escape(person.unsubscribe_business_name);
+    const complete = Boolean(person.quote_email_opted_out);
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>Message preferences — ${name}</title><link rel="stylesheet" href="/q/assets/quote.css"></head><body><main id="customer-quote"><article class="customer-quote-card quote-unavailable"><h1>${complete ? "You’re unsubscribed." : `Stop messages from ${name}?`}</h1><p>${complete ? `You won’t receive more quote emails or texts for this customer from ${name}.` : "This stops quote emails and texts for this customer. It does not change your quote or its status."}</p>${complete ? "" : `<form method="post" action="/q/unsubscribe/${token}"><input type="hidden" name="action" value="unsubscribe"><div class="customer-decision-buttons"><button type="submit">Unsubscribe</button></div></form>`}</article></main></body></html>`;
+  }
+  // GET is intentionally read-only: email security scanners visit links.
+  // Mail clients perform the RFC 8058 one-click operation with a public POST.
+  publicRouter.get("/unsubscribe/:token/data", (req, res) => {
+    const person = unsubscribeContact(req.params.token);
+    res.json({ business_name: person.unsubscribe_business_name, unsubscribed: Boolean(person.quote_email_opted_out) });
+  });
+  publicRouter.get("/unsubscribe/:token", (req, res) => res.type("html").send(unsubscribePage(unsubscribeContact(req.params.token), req.params.token)));
+  const parseUrlencodedUnsubscribe = express.urlencoded({ extended: false, limit: "2kb", parameterLimit: 2 });
+  const parseMultipartUnsubscribe = multer({ limits: { files: 0, fields: 2, fieldSize: 256 } }).none();
+  publicRouter.post("/unsubscribe/:token", (req, res, next) => {
+    if (req.is("application/x-www-form-urlencoded")) return parseUrlencodedUnsubscribe(req, res, next);
+    if (req.is("multipart/form-data")) return parseMultipartUnsubscribe(req, res, (error) => next(error ? new QuoteError(400, "Send a valid unsubscribe request.") : undefined));
+    next(new QuoteError(415, "Send the unsubscribe request as a form."));
+  }, (req, res) => {
+    const person = unsubscribeContact(req.params.token);
+    if (req.body?.["List-Unsubscribe"] !== "One-Click" && req.body?.action !== "unsubscribe") fail(400, "Choose Unsubscribe to stop messages.");
+    transaction(db, () => {
+      const changed = db.prepare("UPDATE contacts SET quote_email_opted_out=1,updated_at=? WHERE business_id=? AND id=? AND quote_email_opted_out=0").run(stamp(), person.business_id, person.id);
+      if (changed.changes) {
+        db.prepare("UPDATE quotes SET follow_ups_cancelled_at=?,updated_at=? WHERE business_id=? AND contact_id=? AND status IN ('sent','viewed') AND follow_ups_cancelled_at IS NULL").run(stamp(), stamp(), person.business_id, person.id);
+        db.prepare("INSERT INTO activity (id,business_id,contact_id,kind,label,mode,created_at) VALUES (?,?,?,'opt_out',?,?,?)").run(randomUUID(), person.business_id, person.id, "Customer unsubscribed from quote emails and texts.", smsMode, stamp());
+      }
+    });
+    res.status(200).type("html").send(unsubscribePage({ ...person, quote_email_opted_out: 1 }, req.params.token));
+  });
   publicRouter.get("/assets/quote.js", (req, res) => res.sendFile(resolve(ROOT, "public/quote.js")));
   publicRouter.get("/assets/quote.css", (req, res) => res.sendFile(resolve(ROOT, "public/quote.css")));
   publicRouter.get("/:token", (req, res) => { fromToken(req.params.token); res.sendFile(resolve(ROOT, "public/quote.html")); });

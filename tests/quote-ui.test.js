@@ -75,6 +75,57 @@ test("send modal requires a channel, submits both channels and reports partial f
   assert.match(context.notices[0].message, /Some messages could not be sent or confirmed/);
 });
 
+test("send result reports a channel skipped after unsubscribe and the quote details explain why", async () => {
+  let submit;
+  const button = { disabled: false };
+  const form = { querySelector: () => button, querySelectorAll: () => ["sms", "email"].map((value) => ({ value })), addEventListener: (_name, handler) => { submit = handler; } };
+  const modal = { showModal() {}, close() {} };
+  const content = { innerHTML: "" };
+  const context = adminContext({
+    document: { querySelector: (selector) => ({ "#dialog-form": form, "#modal": modal, "#modal-content": content })[selector] },
+    shownQuote: { ...quote, status: "draft", sendable_channels: ["sms", "email"], deliveries: [] }, notices: [], releaseSend: null,
+  });
+  new Script(`api = (path, options) => options ? new Promise(resolve => { releaseSend = resolve; }) : Promise.resolve(shownQuote);
+    refresh = async () => {}; toast = (message, error) => notices.push({message,error});`).runInContext(context);
+  await new Script('quoteSendModal("q1");').runInContext(context);
+  const pending = submit({ preventDefault() {}, currentTarget: form });
+  assert.equal(button.disabled, true);
+  new Script(`state.contacts[0].quote_email_opted_out = true;
+    shownQuote = { ...shownQuote, status: "sent", deliveries: [
+      { channel: "sms", kind: "initial", status: "sent" },
+      { channel: "email", kind: "initial", status: "skipped", error: "This customer has opted out of messages." }
+    ] }; releaseSend(shownQuote);`).runInContext(context);
+  await pending;
+  assert.equal(context.notices.at(-1).error, true, "a channel skipped after unsubscribe must not produce a success notice");
+  assert.match(context.notices.at(-1).message, /Some messages could not be sent or confirmed/);
+  assert.match(content.innerHTML, /class="error-box">Email: This customer has opted out of messages\./);
+
+  // A missed day-2 slot is intentionally skipped after downtime. It must not
+  // appear as a delivery problem or change the result of a successful send.
+  new Script(`shownQuote.deliveries = [
+    { channel: "sms", kind: "initial", status: "sent" },
+    { channel: "sms", kind: "nudge_2", status: "skipped", error: null }
+  ]; state.contacts[0].quote_email_opted_out = false;`).runInContext(context);
+  await new Script('quoteSendModal("q1");').runInContext(context);
+  const successful = submit({ preventDefault() {}, currentTarget: form });
+  new Script('releaseSend(shownQuote);').runInContext(context);
+  await successful;
+  assert.equal(context.notices.at(-1).error, false);
+  assert.ok(!content.innerHTML.includes('class="error-box"'));
+});
+
+test("review request picker excludes aggregate SMS opt-outs and the separate email unsubscribe flag", async () => {
+  const content = { innerHTML: "" };
+  const context = adminContext({ document: { querySelector: (selector) => ({ "#modal-content": content, "#modal": { showModal() {} } })[selector] } });
+  new Script(`state.contacts = [
+    { id: "sms-stopped", name: "SMS stopped", sms_consent: true, opted_out: true },
+    { id: "email-unsubscribed", name: "Email unsubscribed", sms_consent: true, opted_out: false, quote_email_opted_out: true }
+  ]; api = async () => { throw new Error("Opted-out customers must not be previewed or sent a request."); };`).runInContext(context);
+  await new Script("requestModal();").runInContext(context);
+  assert.match(content.innerHTML, /Customers who have opted out/);
+  assert.ok(!content.innerHTML.includes('id="contact_id"'));
+});
+
 test("customer quote renders accept/decline only while available and never trusts injected HTML or URLs", () => {
   const context = createContext({ location: { href: "https://example.com/q/token", pathname: "/q/token" } });
   new Script(`${customerFrontend}\ncustomerQuoteData = ${JSON.stringify(quote)};`).runInContext(context);

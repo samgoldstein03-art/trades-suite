@@ -125,7 +125,7 @@ https://your-webhook-host.example/webhooks/twilio/BUSINESS_ID
 
 Use the business's actual ID. The business API at `/api/businesses` returns these IDs. Route this webhook path to the app while keeping the admin pages private. If you use a tunnel or reverse proxy, the external URL must match `PUBLIC_BASE_URL` exactly; the app validates Twilio's signature against that URL and the corresponding business's Auth Token. It also checks the account and destination number. Invalid requests are rejected. See [Twilio webhook security](https://www.twilio.com/docs/usage/security).
 
-STOP and other standard opt-out keywords block further sends to that phone number for that business, including automatic nudges. Opt-outs are recorded by business and phone number, so adding another contact with the same number does not bypass the block. Twilio also blocks opted-out numbers on its side. The app accepts `OptOutType` when configured through Twilio Advanced Opt-Out and recognizes standard reply text; see [Twilio opt-out handling](https://www.twilio.com/docs/messaging/tutorials/advanced-opt-out). Twilio handles its own confirmation reply; the app does not send a second confirmation SMS. A customer must reply START or UNSTOP to the business's number to remove the phone-level block; checking permission in the admin form cannot override it.
+STOP and other standard opt-out keywords block further sends to that phone number for that business, including automatic nudges. Opt-outs are recorded by business and phone number, so adding another contact with the same number does not bypass the block. Twilio also blocks opted-out numbers on its side. The app accepts `OptOutType` when configured through Twilio Advanced Opt-Out and recognizes standard reply text; see [Twilio opt-out handling](https://www.twilio.com/docs/messaging/tutorials/advanced-opt-out). Twilio handles its own confirmation reply; the app does not send a second confirmation SMS. A customer must reply START or UNSTOP to the business's number to remove the phone-level block; checking permission in the admin form cannot override it. START does not undo an unsubscribe made through a quote email.
 
 Every review-request, quote, and follow-up SMS ends with the business name and this exact line:
 
@@ -208,6 +208,16 @@ Use the provider's SMTP-specific credential or app password when required. These
 
 Port **587** requires a successful STARTTLS upgrade; port **465** starts with TLS. Certificate verification stays enabled, plaintext SMTP is not supported, and sending uses bounded timeouts without automatic retries. Provider debug logging is disabled. See the [Nodemailer SMTP documentation](https://nodemailer.com/smtp) for the transport options and your provider's instructions for sender/domain verification. Email mode follows `SMS_MODE`: `demo` sends no email, and `twilio` enables real configured deliveries. Confirm one authorized test email arrived before calling email delivery verified.
 
+### Unsubscribe from quote messages
+
+Every initial quote email contains a visible **Stop quote emails and texts** footer link. It also includes `List-Unsubscribe: <https://...>` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click` headers for email clients that offer an Unsubscribe action. Both use a private, random link for that customer in that business; no customer login or admin password is required.
+
+Following the footer link opens a page with an unsubscribe button. Simply fetching the link does not change permission, so email scanners cannot unsubscribe someone just by previewing it. Submitting the button, or the email client's one-click POST, opts out immediately and records the change in the business's Activity log. Repeating an unsubscribe is safe and does not create duplicate changes. The public endpoint accepts the one-click form value `List-Unsubscribe=One-Click` and returns the result directly without redirecting.
+
+The opt-out belongs to the existing contact in the selected business. It blocks quote emails, quote texts, and automatic quote reminders; the existing review-request SMS checks also respect the contact opt-out. An opt-out in one business does not change permission in another business. A phone-level STOP also prevents quote email sending for that opted-out contact. Replying START can remove a phone-level STOP but does not restore permission withdrawn through the quote email link, and changing an email address or phone number does not clear that unsubscribe.
+
+Keep the unsubscribe endpoint reachable through the public HTTPS host used for customer quote links, outside the admin login. Treat unsubscribe links as private customer links, and exclude them from public logs. For live email, configure the SMTP provider to apply a valid **DKIM signature covering both unsubscribe headers**; receiving mail systems may hide their one-click action without it. The app supplies the headers and public handler, while the provider supplies sender-domain signing. See [RFC 8058, sections 3 and 4](https://www.rfc-editor.org/rfc/rfc8058.html#section-3). Verify the received message's headers and test an unsubscribe using a consenting test contact before sending to real customers.
+
 ## Settings and storage
 
 | Environment variable          | Default             | Purpose                                                                 |
@@ -248,7 +258,7 @@ Set `ADMIN_ORIGIN=https://your-admin.example` to the exact external origin, with
 
 **Built in Phase 1:** multiple editable business profiles with logo uploads; separate customer lists with notes and tags; per-business Twilio configuration; review-request SMS; one automatic three-day nudge; manual completion; phone-level opt-out handling; timestamped activity; a per-business dashboard; demo mode and automated tests.
 
-**Built in Phase 2:** business-scoped quotes with line items, tax, totals, expiry, and customer-facing notes; drafts and status filters; delivery by SMS and optional email; mobile-friendly customer links with Accept/Decline; activity and dashboard integration; two cancellable SMS reminders after two and five days; simulated sends and automated tests.
+**Built in Phase 2:** business-scoped quotes with line items, tax, totals, expiry, and customer-facing notes; drafts and status filters; delivery by SMS and optional email with unsubscribe headers and a visible footer; customer opt-outs shared across sending channels; mobile-friendly customer links with Accept/Decline; activity and dashboard integration; two cancellable SMS reminders after two and five days; simulated sends and automated tests.
 
 **Planned for Phase 3:** missed-call text-back. It is not built or shown as a working control. There are no per-business logins, payments, billing, mobile app, Google review detection, or delivery-receipt processing in these phases.
 

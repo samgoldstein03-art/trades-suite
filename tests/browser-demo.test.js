@@ -79,6 +79,69 @@ test("browser quotes skip stale reminders after downtime and do not expose unsen
   assert.equal(delivered.nudge_count, 1);
 });
 
+test("browser quote emails include an unsubscribe link and both channels honor its business-scoped contact choice", async () => {
+  const saved = storage();
+  const api = createBrowserDemo(saved);
+  const [business, other] = await api("/api/businesses");
+  const base = `/api/businesses/${business.id}`;
+  const otherBase = `/api/businesses/${other.id}`;
+  const customer = (await api(`${base}/contacts`)).at(-1);
+  const samePhoneCustomer = await api(`${base}/contacts`, post({ name: "Another household member", phone: customer.phone, email: "household@example.com", sms_consent: true }));
+  const otherCustomer = await api(`${otherBase}/contacts`, post({ name: customer.name, phone: customer.phone, email: customer.email, sms_consent: true }));
+  const draft = await draftQuote(api, base, customer);
+  const sent = await api(`${base}/quotes/${draft.id}/send`, post({ channels: ["email"] }));
+  const delivery = sent.deliveries[0];
+  assert.equal(delivery.headers["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
+  const unsubscribeUrl = delivery.headers["List-Unsubscribe"].slice(1, -1);
+  assert.match(unsubscribeUrl, /^https:\/\/demo\.example\.test\/#unsubscribe\//);
+  const token = new URL(unsubscribeUrl).hash.slice("#unsubscribe/".length);
+  const email = (await api(`${base}/activity`)).find((entry) => entry.quote_id === draft.id && entry.kind === "email_sent");
+  assert.ok(email.body.endsWith(`Unsubscribe: ${unsubscribeUrl}`));
+  const preferencesPath = `/q/unsubscribe/${token}`;
+  assert.deepEqual(await api(`${preferencesPath}/data`), { business_name: business.name, unsubscribed: false });
+  assert.equal((await api(`${base}/contacts`)).find((c) => c.id === customer.id).opted_out, false, "link scanners must not unsubscribe on a GET");
+  const customerTab = createBrowserDemo(saved);
+  assert.equal((await customerTab(preferencesPath, post({ "List-Unsubscribe": "One-Click" }))).unsubscribed, true);
+  await customerTab(preferencesPath, post({}));
+  const reloaded = createBrowserDemo(saved);
+  const opted = (await reloaded(`${base}/contacts`)).find((c) => c.id === customer.id);
+  assert.equal(opted.quote_email_opted_out, true);
+  assert.equal(opted.opted_out, true);
+  assert.equal((await reloaded(`${base}/activity`)).filter((entry) => entry.kind === "contact_unsubscribed").length, 1);
+  assert.equal((await reloaded(`${base}/contacts`)).find((c) => c.id === samePhoneCustomer.id).opted_out, false, "an email choice applies to this contact only");
+  await assert.rejects(reloaded(`${base}/quotes/${draft.id}/send`, post({ channels: ["sms"] })), /opted out/);
+  const futureDraft = await draftQuote(reloaded, base, customer);
+  await assert.rejects(reloaded(`${base}/quotes/${futureDraft.id}/send`, post({ channels: ["email"] })), /opted out/);
+  await assert.rejects(reloaded(`${base}/requests`, post({ contact_id: customer.id })), /permission/);
+  assert.equal((await reloaded(`${base}/quotes/demo/advance`, post({ days: 5 }))).sent, 0);
+  const otherDraft = await draftQuote(reloaded, otherBase, otherCustomer);
+  assert.equal((await reloaded(`${otherBase}/quotes/${otherDraft.id}/send`, post({ channels: ["email", "sms"] }))).deliveries.length, 2);
+  await assert.rejects(reloaded("/q/unsubscribe/unknown/data"), /not found/);
+});
+
+test("browser SMS opt-outs also block quote emails and contact edits cannot erase email unsubscribe", async () => {
+  const saved = storage();
+  const api = createBrowserDemo(saved);
+  const [business] = await api("/api/businesses");
+  const base = `/api/businesses/${business.id}`;
+  const [customer] = await api(`${base}/contacts`);
+  const draft = await draftQuote(api, base, customer);
+  const stored = JSON.parse(saved.getItem("tradesuite-browser-demo-v1"));
+  stored.contacts.find((c) => c.id === customer.id).opted_out = true;
+  saved.setItem("tradesuite-browser-demo-v1", JSON.stringify(stored));
+  await assert.rejects(api(`${base}/quotes/${draft.id}/send`, post({ channels: ["email"] })), /opted out/);
+  const clearedSms = JSON.parse(saved.getItem("tradesuite-browser-demo-v1"));
+  const storedCustomer = clearedSms.contacts.find((c) => c.id === customer.id);
+  storedCustomer.opted_out = false;
+  storedCustomer.quote_email_opted_out = true;
+  saved.setItem("tradesuite-browser-demo-v1", JSON.stringify(clearedSms));
+  await api(`${base}/contacts/${customer.id}`, { method: "PATCH", body: JSON.stringify({ email: "updated@example.com", phone: "+14165550999", quote_email_opted_out: false, opted_out: false, sms_consent: true }) });
+  const updated = (await api(`${base}/contacts`)).find((c) => c.id === customer.id);
+  assert.equal(updated.quote_email_opted_out, true);
+  assert.equal(updated.opted_out, true);
+  await assert.rejects(api(`${base}/quotes/${draft.id}/send`, post({ channels: ["sms", "email"] })), /opted out/);
+});
+
 test("standalone browser demo supports business/customer/request/nudge/done and reload", async () => {
   const saved = storage();
   const api = createBrowserDemo(saved);
@@ -167,6 +230,43 @@ const frontendState = {
     ],
   },
 };
+
+test("quote send dialog disables both channels when the customer unsubscribed", async () => {
+  const content = { innerHTML: "" };
+  const modal = { showModal() {} };
+  const form = { addEventListener() {} };
+  const context = {
+    document: { querySelector: (selector) => ({ "#modal": modal, "#modal-content": content, "#dialog-form": form })[selector] },
+    quoted: { id: "q1", status: "draft", contact_id: "c1", contact_name: "Jamie", total_cents: 10000, currency: "CAD", sendable_channels: ["sms", "email"] },
+  };
+  new Script(`${frontendFunctions}\nstate = ${JSON.stringify(frontendState)};
+    state.contacts = [{ id: "c1", phone: "+14165550123", email: "jamie@example.com", sms_consent: true, opted_out: false, quote_email_opted_out: true }];
+    api = async () => quoted;`).runInNewContext(context);
+  await new Script('quoteSendModal("q1");').runInNewContext(context);
+  assert.match(content.innerHTML, /value="sms" disabled/);
+  assert.match(content.innerHTML, /value="email" disabled/);
+  assert.equal((content.innerHTML.match(/This customer has opted out of messages\./g) || []).length, 2);
+  assert.match(content.innerHTML, /Every quote email includes an unsubscribe link/);
+});
+
+test("browser unsubscribe page waits for confirmation, then shows the immediate result", async () => {
+  const main = { innerHTML: "" };
+  const context = {
+    document: { querySelector: () => main }, location: { hash: "#unsubscribe/token" }, calls: [],
+  };
+  new Script(`${frontendFunctions}\napi = async (path, options) => { calls.push({ path, options }); return { business_name: "Business <sample>", unsubscribed: options.method === "POST" }; };`).runInNewContext(context);
+  await new Script('renderBrowserUnsubscribe("token");').runInNewContext(context);
+  assert.equal(context.calls[0].path, "/q/unsubscribe/token/data");
+  assert.equal(context.calls[0].options.method, undefined);
+  assert.match(main.innerHTML, /Stop messages from Business &lt;sample&gt;\?/);
+  assert.match(main.innerHTML, /data-action="confirm-email-unsubscribe"/);
+  await new Script('renderBrowserUnsubscribe("token", true);').runInNewContext(context);
+  assert.equal(context.calls[1].path, "/q/unsubscribe/token");
+  assert.equal(context.calls[1].options.method, "POST");
+  assert.match(main.innerHTML, /You’re unsubscribed/);
+  assert.match(main.innerHTML, /Texts and quote emails from Business &lt;sample&gt; are paused/);
+  assert.ok(!main.innerHTML.includes('data-action="confirm-email-unsubscribe"'));
+});
 
 test("dashboard keeps failed nudges visible and disables uncertain retries with a reason", () => {
   const html = new Script(`${frontendFunctions}\nstate = ${JSON.stringify(frontendState)}; dashboardPage();`).runInNewContext({});

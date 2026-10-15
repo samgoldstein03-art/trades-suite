@@ -145,7 +145,8 @@ export function createApp({
     ...contact,
     tags: JSON.parse(contact.tags),
     sms_consent: Boolean(contact.sms_consent),
-    opted_out: Boolean(contact.opted_out),
+    opted_out: Boolean(contact.opted_out || contact.quote_email_opted_out),
+    quote_email_opted_out: Boolean(contact.quote_email_opted_out),
   });
   const log = ({
     businessId,
@@ -181,7 +182,7 @@ export function createApp({
       .all(businessId, limit);
   const isBlocked = (businessId, contact) =>
     Boolean(
-      contact.opted_out ||
+      contact.opted_out || contact.quote_email_opted_out ||
         db
           .prepare(
             "SELECT 1 FROM phone_opt_outs WHERE business_id = ? AND phone = ?",
@@ -372,7 +373,7 @@ export function createApp({
               businessId: business.id,
               contactId: contact?.id || null,
               kind: "opt_in",
-              label: "Customer replied START and allowed texts again.",
+              label: "Customer replied START and cleared the SMS phone opt-out.",
             });
           }
         }
@@ -696,7 +697,14 @@ export function createApp({
   app.patch("/api/businesses/:businessId/contacts/:contactId", (req, res) => {
     getBusiness(req.params.businessId);
     const existing = getContact(req.params.businessId, req.params.contactId);
-    const data = contactInput(req.body, contactView(existing));
+    // The public opt-out flag aggregates both sources; do not turn an email
+    // unsubscribe into a phone-wide SMS suppression when saving a name/email.
+    const data = contactInput(req.body, { ...contactView(existing), opted_out: Boolean(existing.opted_out) });
+    if (existing.quote_email_opted_out) {
+      if (req.body.opted_out === false || req.body.quote_email_opted_out === false)
+        bad("This customer unsubscribed from messages. Editing their details cannot restore permission.");
+      data.opted_out = existing.opted_out;
+    }
     // Permission belongs to a number. Save a changed number first, then reconfirm.
     if (data.phone !== existing.phone) data.sms_consent = 0;
     if (existing.opted_out && req.body.opted_out === false)
@@ -748,7 +756,8 @@ export function createApp({
     res.json(
       db
         .prepare(
-          `SELECT r.*, c.name AS contact_name, c.phone AS contact_phone, c.opted_out, c.sms_consent
+          `SELECT r.*, c.name AS contact_name, c.phone AS contact_phone,
+       (c.opted_out OR c.quote_email_opted_out) AS opted_out, c.quote_email_opted_out, c.sms_consent
       FROM review_requests r JOIN contacts c ON c.id = r.contact_id AND c.business_id = r.business_id
       WHERE r.business_id = ? ORDER BY r.sent_at DESC, r.rowid DESC`,
         )
@@ -886,7 +895,7 @@ export function createApp({
         `SELECT r.*, c.name AS contact_name, c.phone AS contact_phone
       FROM review_requests r JOIN contacts c ON c.id=r.contact_id AND c.business_id=r.business_id
       WHERE r.business_id=? AND r.mode=? AND r.status='sent' AND r.nudge_attempted_at IS NULL
-        AND c.opted_out=0 AND c.sms_consent=1
+        AND c.opted_out=0 AND c.quote_email_opted_out=0 AND c.sms_consent=1
         AND NOT EXISTS(SELECT 1 FROM phone_opt_outs p WHERE p.business_id=c.business_id AND p.phone=c.phone)
         AND EXISTS(SELECT 1 FROM sms_messages m WHERE m.business_id=r.business_id AND m.request_id=r.id AND m.kind='initial' AND m.to_phone=c.phone)
       ORDER BY r.nudge_due_at`,

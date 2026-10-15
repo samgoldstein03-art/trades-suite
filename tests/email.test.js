@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { emailReady, emailTransport, safeEmailFailure } from "../src/email.js";
+import nodemailer from "nodemailer";
+import { buildQuoteEmailText, emailReady, emailTransport, safeEmailFailure } from "../src/email.js";
 
 const BUSINESS = { id: "business-alpha", name: "Alpha Plumbing", sms_key: "ALPHA" };
 const RECIPIENT = "customer@example.test";
+const UNSUBSCRIBE_URL = "https://quotes.example.test/unsubscribe/synthetic-contact-link";
 const SETTINGS = { HOST: "smtp.example.test", PORT: "587", USER: "alpha-user", PASSWORD: "synthetic-alpha-secret", FROM: "quotes@alpha.example.test" };
 
 function configure(t, business = BUSINESS, overrides = {}) {
@@ -20,7 +22,7 @@ function configure(t, business = BUSINESS, overrides = {}) {
 }
 
 function message(overrides = {}) {
-  return { business: BUSINESS, to: RECIPIENT, subject: "Your quote from Alpha Plumbing", text: "Your quote is ready: https://quotes.example.test/q/synthetic-link", ...overrides };
+  return { business: BUSINESS, to: RECIPIENT, subject: "Your quote from Alpha Plumbing", text: "Your quote is ready: https://quotes.example.test/q/synthetic-link", unsubscribeUrl: UNSUBSCRIBE_URL, ...overrides };
 }
 
 test("email uses each business's SMTP settings and requires verified TLS", async (t) => {
@@ -49,6 +51,11 @@ test("email uses each business's SMTP settings and requires verified TLS", async
         assert.deepEqual(payload.envelope, { from, to: [RECIPIENT] });
         assert.equal(payload.to, RECIPIENT);
         assert.equal(payload.html, undefined);
+        assert.deepEqual(payload.headers, {
+          "List-Unsubscribe": `<${UNSUBSCRIBE_URL}>`,
+          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        });
+        assert.ok(payload.text.endsWith(`Stop quote emails and texts from ${business.name}: ${UNSUBSCRIBE_URL}`));
         return { accepted: [RECIPIENT], messageId: "synthetic-id", response: "not returned to caller" };
       }, close() { closed++; } };
     } }));
@@ -56,6 +63,42 @@ test("email uses each business's SMTP settings and requires verified TLS", async
     assert.equal(closed, 1);
     assert.deepEqual(result, { messageId: "synthetic-id", accepted: [RECIPIENT] });
   }
+});
+
+test("quote email includes a visible unsubscribe footer once and real one-click MIME headers", async (t) => {
+  configure(t);
+  const text = buildQuoteEmailText({ businessName: BUSINESS.name, customerName: "Jamie Customer", url: "https://quotes.example.test/q/synthetic-link", unsubscribeUrl: UNSUBSCRIBE_URL });
+  assert.match(text, /^Hi Jamie,\n\nYour quote from Alpha Plumbing is ready\./);
+  assert.ok(text.endsWith(`Stop quote emails and texts from ${BUSINESS.name}: ${UNSUBSCRIBE_URL}`));
+  let raw;
+  await emailTransport(message({ text, createTransport() {
+    const transport = nodemailer.createTransport({ streamTransport: true, buffer: true, newline: "unix" });
+    return { async sendMail(payload) {
+      assert.equal(payload.text, text, "the stored and delivered bodies must match without duplicate footers");
+      const result = await transport.sendMail(payload);
+      raw = result.message.toString();
+      return { ...result, accepted: [RECIPIENT] };
+    }, close() { transport.close(); } };
+  } }));
+  const unfolded = raw.replace(/\r?\n[ \t]+/g, " ");
+  assert.match(unfolded, new RegExp(`^List-Unsubscribe: <${UNSUBSCRIBE_URL}>$`, "m"));
+  assert.match(unfolded, /^List-Unsubscribe-Post: List-Unsubscribe=One-Click$/m);
+  assert.equal((raw.match(/Stop quote emails and texts from/g) || []).length, 1);
+  assert.equal(raw.includes(SETTINGS.PASSWORD), false);
+});
+
+test("a valid HTTPS unsubscribe link is required before sending an email", async (t) => {
+  configure(t);
+  for (const unsubscribeUrl of [undefined, "", "not a URL", "http://quotes.example.test/unsubscribe/link", "https://user:password@quotes.example.test/unsubscribe/link", "https://quotes.example.test/unsubscribe/link#fragment", "https://quotes.example.test/unsubscribe/link\r\nBcc: hidden@example.test", "https://quotes.example.test/unsubscribe/%0d%0alink", "https://quotes.example.test/unsubscribe/link><mailto:hidden@example.test>"]) {
+    await assert.rejects(emailTransport(message({ unsubscribeUrl, createTransport() { assert.fail("Do not connect without a safe unsubscribe URL"); } })), { code: "EEMAILINPUT" });
+  }
+});
+
+test("only explicitly enabled local demo email bodies may use HTTP unsubscribe links", () => {
+  const details = { businessName: BUSINESS.name, customerName: "Jamie", url: "http://127.0.0.1:3000/q/demo", unsubscribeUrl: "http://127.0.0.1:3000/unsubscribe/demo" };
+  assert.throws(() => buildQuoteEmailText(details), { code: "EEMAILINPUT" });
+  assert.ok(buildQuoteEmailText({ ...details, allowHttp: true }).endsWith(details.unsubscribeUrl));
+  assert.throws(() => buildQuoteEmailText({ ...details, allowHttp: true, unsubscribeUrl: "http://quotes.example.test/unsubscribe/demo" }), { code: "EEMAILINPUT" });
 });
 
 test("missing settings and invalid sender addresses fail before opening a connection", async (t) => {

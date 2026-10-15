@@ -150,7 +150,19 @@ export function openDatabase(dbPath) {
   `);
   if (!db.prepare("PRAGMA table_info(activity)").all().some((column) => column.name === "quote_id"))
     db.exec("ALTER TABLE activity ADD COLUMN quote_id TEXT");
-  db.exec("PRAGMA user_version = 2");
+  if (!db.prepare("PRAGMA table_info(contacts)").all().some((column) => column.name === "quote_email_opted_out"))
+    db.exec("ALTER TABLE contacts ADD COLUMN quote_email_opted_out INTEGER NOT NULL DEFAULT 0 CHECK(quote_email_opted_out IN (0,1))");
+  if (!db.prepare("PRAGMA table_info(quote_deliveries)").all().some((column) => column.name === "unsubscribe_url"))
+    db.exec("ALTER TABLE quote_deliveries ADD COLUMN unsubscribe_url TEXT");
+  // Capabilities are scoped to a contact, independent of any quote's lifetime.
+  // Store only their hashes; old email links continue to work after expiry.
+  db.exec(`CREATE TABLE IF NOT EXISTS contact_unsubscribe_links (
+    token_hash TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL,
+    contact_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(business_id,contact_id) REFERENCES contacts(business_id,id)
+  ); PRAGMA user_version = 3;`);
   return db;
 }
 

@@ -161,7 +161,12 @@ async function refresh() {
 function render() {
   state.page = location.hash.slice(1) || "dashboard";
   const customerRoute = state.config.browser_demo && /^quote\/([A-Za-z0-9_-]+)$/.exec(state.page);
-  document.body.classList.toggle("customer-quote-view", Boolean(customerRoute));
+  const unsubscribeRoute = state.config.browser_demo && /^unsubscribe\/([A-Za-z0-9_-]+)$/.exec(state.page);
+  document.body.classList.toggle("customer-quote-view", Boolean(customerRoute || unsubscribeRoute));
+  if (unsubscribeRoute) {
+    renderBrowserUnsubscribe(unsubscribeRoute[1]);
+    return;
+  }
   if (customerRoute) {
     renderBrowserCustomerQuote(customerRoute[1]);
     return;
@@ -262,7 +267,7 @@ function contactsPage() {
 }
 function contactsTable(contacts) {
   return contacts.length
-    ? `<table><thead><tr><th>Name & phone</th><th>Email</th><th>Relationship</th><th>Text messages</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${contacts.map((c) => `<tr><td>${customerInfo(c)}</td><td>${escape(c.email || "—")}</td><td>${(Array.isArray(c.tags) ? c.tags : [c.tags]).filter(Boolean).map(badge).join(" ")}</td><td>${c.opted_out ? badge("opted-out") : c.sms_consent ? '<span class="success-text">Permission recorded</span>' : '<span class="subtle">No permission yet</span>'}</td><td><button class="text-button table-action" data-action="edit-contact" data-id="${escape(c.id)}">Edit ${icon("edit")}</button></td></tr>`).join("")}</tbody></table>`
+    ? `<table><thead><tr><th>Name & phone</th><th>Email</th><th>Relationship</th><th>Message permission</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${contacts.map((c) => `<tr><td>${customerInfo(c)}</td><td>${escape(c.email || "—")}</td><td>${(Array.isArray(c.tags) ? c.tags : [c.tags]).filter(Boolean).map(badge).join(" ")}</td><td>${c.opted_out ? badge("opted-out") : c.sms_consent ? '<span class="success-text">Text permission recorded</span>' : '<span class="subtle">No text permission yet</span>'}</td><td><button class="text-button table-action" data-action="edit-contact" data-id="${escape(c.id)}">Edit ${icon("edit")}</button></td></tr>`).join("")}</tbody></table>`
     : empty(
         "No customers here yet",
         "Add a customer to start building your list.",
@@ -351,6 +356,19 @@ async function respondBrowserCustomerQuote(decision) {
   if (location.hash !== `#quote/${current.token}`) return;
   browserCustomerQuote = { token: current.token, quote };
   $("#main").innerHTML = browserQuotePageMarkup(quote, failure?.message);
+}
+async function renderBrowserUnsubscribe(token, confirmed = false) {
+  const run = ++browserQuoteGeneration;
+  $("#main").innerHTML = '<div class="loading">Opening message preferences…</div>';
+  try {
+    const info = await api(`/q/unsubscribe/${encodeURIComponent(token)}${confirmed ? "" : "/data"}`, confirmed ? { method: "POST", body: "{}" } : {});
+    if (run !== browserQuoteGeneration || location.hash !== `#unsubscribe/${token}`) return;
+    const name = escape(info.business_name);
+    $("#main").innerHTML = `<div class="browser-customer-quote"><a class="browser-quote-back" href="#quotes">← Back to workspace</a><section class="panel form-panel"><h1>${info.unsubscribed ? "You’re unsubscribed." : `Stop messages from ${name}?`}</h1><p>${info.unsubscribed ? `Texts and quote emails from ${name} are paused.` : `Unsubscribing stops texts and quote emails from ${name}. Your choices for other businesses stay the same.`}</p>${info.unsubscribed ? "" : `<button class="button" data-action="confirm-email-unsubscribe" data-token="${escape(token)}">Unsubscribe</button>`}<p class="note">Browser demo · No real texts or emails are sent.</p></section></div>`;
+  } catch (error) {
+    if (run !== browserQuoteGeneration || location.hash !== `#unsubscribe/${token}`) return;
+    $("#main").innerHTML = `<div class="browser-customer-quote"><section class="panel form-panel"><h1>This link couldn’t be opened.</h1><p>${escape(error.message)}</p></section></div>`;
+  }
 }
 function field(label, name, value = "", type = "text", extra = "", help = "") {
   return `<div class="form-field"><label for="${name}">${label}</label><input id="${name}" name="${name}" type="${type}" value="${escape(value)}" ${extra}>${help ? `<small>${help}</small>` : ""}</div>`;
@@ -484,7 +502,7 @@ function contactModal(id) {
       ? "Update their details and keep in touch."
       : "A few details now make following up easy.",
     modalForm(
-      `<div class="form-grid">${field("Full name", "name", c.name, "text", 'required maxlength="100"')}${field("Phone number", "phone", c.phone, "tel", 'required placeholder="+14165550123"', "Include the country code.")}${field("Email (optional)", "email", c.email, "email")}<div class="form-field"><label for="tags">Relationship</label><select name="tags" id="tags"><option value="customer" ${(c.tags || []).includes("customer") ? "selected" : ""}>Customer</option><option value="lead" ${(c.tags || []).includes("lead") ? "selected" : ""}>Lead</option></select></div></div><div class="form-field" style="margin-top:17px"><label for="notes">Notes (optional)</label><textarea name="notes" id="notes" placeholder="Anything worth remembering…">${escape(c.notes || "")}</textarea></div><label class="checkbox-label"><input type="checkbox" name="sms_consent" ${c.sms_consent ? "checked" : ""}><span>This person has given us permission to text them about reviews and quotes.</span></label>${c.opted_out ? '<p class="note danger-text">This customer has opted out. Text messages are paused until they text START.</p>' : ""}`,
+      `<div class="form-grid">${field("Full name", "name", c.name, "text", 'required maxlength="100"')}${field("Phone number", "phone", c.phone, "tel", 'required placeholder="+14165550123"', "Include the country code.")}${field("Email (optional)", "email", c.email, "email")}<div class="form-field"><label for="tags">Relationship</label><select name="tags" id="tags"><option value="customer" ${(c.tags || []).includes("customer") ? "selected" : ""}>Customer</option><option value="lead" ${(c.tags || []).includes("lead") ? "selected" : ""}>Lead</option></select></div></div><div class="form-field" style="margin-top:17px"><label for="notes">Notes (optional)</label><textarea name="notes" id="notes" placeholder="Anything worth remembering…">${escape(c.notes || "")}</textarea></div><label class="checkbox-label"><input type="checkbox" name="sms_consent" ${c.sms_consent ? "checked" : ""}><span>This person has given us permission to text them about reviews and quotes.</span></label>${c.opted_out ? '<p class="note danger-text">This customer has opted out. Text messages and quote emails are paused for this business.</p>' : ""}`,
       c.id ? "Save customer" : "Add customer",
     ),
   );
@@ -567,13 +585,16 @@ function safeQuoteUrl(url) {
     return ["https:", "http:"].includes(parsed.protocol) || localDemo ? parsed.href : "";
   } catch { return ""; }
 }
+function quoteDeliveryNeedsAttention(delivery) {
+  return ["failed", "unknown", "uncertain"].includes(delivery.status) || (delivery.status === "skipped" && Boolean(delivery.error));
+}
 async function quoteDetail(id) {
   const context = base();
   const q = await api(`${context}/quotes/${encodeURIComponent(id)}`);
   if (context !== base()) return;
   const customerLink = safeQuoteUrl(q.public_url);
   const unanswered = ["sent", "viewed"].includes(q.status);
-  openModal(escape(q.reference || "Your quote"), escape(q.contact_name), `<div class="quote-detail"><div class="quote-detail-meta">${badge(q.status)}<span>Valid through ${escape(quoteDate(q.expiry_date))}</span></div><div class="quote-detail-items">${q.line_items.map((item) => `<div><span><strong>${escape(item.description)}</strong><small>${escape(item.quantity)} × ${escape(money(Math.round(item.unit_price * 100), q.currency))}</small></span><strong>${escape(money(item.line_total_cents, q.currency))}</strong></div>`).join("")}</div>${quoteTotalsMarkup(q)}${q.notes ? `<div class="quote-note"><strong>Note to your customer</strong><p>${escape(q.notes)}</p></div>` : ""}${q.status !== "draft" && customerLink ? `<div class="quote-link-box"><strong>Customer link</strong><a href="${escape(customerLink)}" target="_blank" rel="noopener">Open the customer’s quote ${icon("arrow")}</a><p class="note">Anyone with this link can view and respond. Opening it records a view.</p></div>` : ""}${(q.deliveries || []).some((d) => ["failed", "unknown", "uncertain"].includes(d.status)) ? `<div class="error-box">${(q.deliveries || []).filter((d) => ["failed", "unknown", "uncertain"].includes(d.status)).map((d) => `${escape(d.channel === "email" ? "Email" : "Text")}: ${escape(d.error || "Sending could not be confirmed. Check the activity log.")}`).join("<br>")}</div>` : ""}<div class="quote-reminders"><strong>${escape(quoteFollowUpText(q))}</strong>${unanswered && !q.follow_ups_cancelled_at && q.nudge_count < 2 ? `<button class="text-button" data-action="cancel-quote-followups" data-id="${escape(q.id)}">Stop reminders</button>` : ""}</div>${unanswered && isDemo() ? `<div class="quote-demo-tools"><strong>Try the automatic reminders</strong><p class="note">Move this business’s demo quotes forward. No real texts or emails are sent.</p><div><button class="button secondary small-button" data-action="quote-demo-advance" data-days="2" data-id="${escape(q.id)}">Move forward 2 days</button><button class="button secondary small-button" data-action="quote-demo-advance" data-days="3" data-id="${escape(q.id)}">Then 3 more days</button></div></div>` : ""}<div class="form-actions"><button class="button secondary" data-action="close">Close</button>${q.status === "draft" && !(q.deliveries || []).length ? `<button class="button secondary" data-action="edit-quote" data-id="${escape(q.id)}">Edit draft</button>` : ""}${["draft", "sent", "viewed"].includes(q.status) && (q.sendable_channels || ["sms", "email"]).length ? `<button class="button" data-action="send-quote" data-id="${escape(q.id)}">${q.status === "draft" ? "Send quote" : "Send link"} ${icon("send")}</button>` : ""}</div></div>`);
+  openModal(escape(q.reference || "Your quote"), escape(q.contact_name), `<div class="quote-detail"><div class="quote-detail-meta">${badge(q.status)}<span>Valid through ${escape(quoteDate(q.expiry_date))}</span></div><div class="quote-detail-items">${q.line_items.map((item) => `<div><span><strong>${escape(item.description)}</strong><small>${escape(item.quantity)} × ${escape(money(Math.round(item.unit_price * 100), q.currency))}</small></span><strong>${escape(money(item.line_total_cents, q.currency))}</strong></div>`).join("")}</div>${quoteTotalsMarkup(q)}${q.notes ? `<div class="quote-note"><strong>Note to your customer</strong><p>${escape(q.notes)}</p></div>` : ""}${q.status !== "draft" && customerLink ? `<div class="quote-link-box"><strong>Customer link</strong><a href="${escape(customerLink)}" target="_blank" rel="noopener">Open the customer’s quote ${icon("arrow")}</a><p class="note">Anyone with this link can view and respond. Opening it records a view.</p></div>` : ""}${(q.deliveries || []).some(quoteDeliveryNeedsAttention) ? `<div class="error-box">${(q.deliveries || []).filter(quoteDeliveryNeedsAttention).map((d) => `${escape(d.channel === "email" ? "Email" : "Text")}: ${escape(d.error || "Sending could not be confirmed. Check the activity log.")}`).join("<br>")}</div>` : ""}<div class="quote-reminders"><strong>${escape(quoteFollowUpText(q))}</strong>${unanswered && !q.follow_ups_cancelled_at && q.nudge_count < 2 ? `<button class="text-button" data-action="cancel-quote-followups" data-id="${escape(q.id)}">Stop reminders</button>` : ""}</div>${unanswered && isDemo() ? `<div class="quote-demo-tools"><strong>Try the automatic reminders</strong><p class="note">Move this business’s demo quotes forward. No real texts or emails are sent.</p><div><button class="button secondary small-button" data-action="quote-demo-advance" data-days="2" data-id="${escape(q.id)}">Move forward 2 days</button><button class="button secondary small-button" data-action="quote-demo-advance" data-days="3" data-id="${escape(q.id)}">Then 3 more days</button></div></div>` : ""}<div class="form-actions"><button class="button secondary" data-action="close">Close</button>${q.status === "draft" && !(q.deliveries || []).length ? `<button class="button secondary" data-action="edit-quote" data-id="${escape(q.id)}">Edit draft</button>` : ""}${["draft", "sent", "viewed"].includes(q.status) && (q.sendable_channels || ["sms", "email"]).length ? `<button class="button" data-action="send-quote" data-id="${escape(q.id)}">${q.status === "draft" ? "Send quote" : "Send link"} ${icon("send")}</button>` : ""}</div></div>`);
 }
 async function quoteSendModal(id) {
   const context = base();
@@ -581,9 +602,10 @@ async function quoteSendModal(id) {
   if (context !== base() || !["draft", "sent", "viewed"].includes(q.status)) return;
   const contact = state.contacts.find((c) => c.id === q.contact_id) || {};
   const sendable = q.sendable_channels || ["sms", "email"];
-  const smsAllowed = Boolean(contact.sms_consent && !contact.opted_out && sendable.includes("sms"));
-  const emailAllowed = Boolean(contact.email && sendable.includes("email"));
-  openModal("Send your quote.", `${escape(q.contact_name)} · ${escape(money(q.total_cents, q.currency))}`, modalForm(`<div class="quote-send-options"><label class="checkbox-label"><input type="checkbox" name="channel" value="sms" ${smsAllowed ? "checked" : "disabled"}><span><strong>Text message</strong><small>${smsAllowed ? escape(contact.phone) : !sendable.includes("sms") ? "Already sent or delivery awaiting confirmation." : "Record permission to text this customer first."}</small></span></label><label class="checkbox-label"><input type="checkbox" name="channel" value="email" ${emailAllowed ? (!smsAllowed ? "checked" : "") : "disabled"}><span><strong>Email</strong><small>${emailAllowed ? escape(contact.email) : !sendable.includes("email") ? "Already sent or delivery awaiting confirmation." : "Add an email address to this customer first."}</small></span></label></div><p class="note">Your customer gets a private quote link with Accept and Decline buttons. Unanswered quotes get up to two text reminders, if they have given permission.</p>${isDemo() ? '<p class="note"><strong>Demo mode:</strong> no real texts or emails are sent. Open the customer link after sending to try it.</p>' : ""}`, isDemo() ? "Send demo quote" : "Send quote"));
+  const optedOut = Boolean(contact.opted_out || contact.quote_email_opted_out);
+  const smsAllowed = Boolean(contact.sms_consent && !optedOut && sendable.includes("sms"));
+  const emailAllowed = Boolean(contact.email && !optedOut && sendable.includes("email"));
+  openModal("Send your quote.", `${escape(q.contact_name)} · ${escape(money(q.total_cents, q.currency))}`, modalForm(`<div class="quote-send-options"><label class="checkbox-label"><input type="checkbox" name="channel" value="sms" ${smsAllowed ? "checked" : "disabled"}><span><strong>Text message</strong><small>${smsAllowed ? escape(contact.phone) : optedOut ? "This customer has opted out of messages." : !sendable.includes("sms") ? "Already sent or delivery awaiting confirmation." : "Record permission to text this customer first."}</small></span></label><label class="checkbox-label"><input type="checkbox" name="channel" value="email" ${emailAllowed ? (!smsAllowed ? "checked" : "") : "disabled"}><span><strong>Email</strong><small>${emailAllowed ? escape(contact.email) : optedOut ? "This customer has opted out of messages." : !sendable.includes("email") ? "Already sent or delivery awaiting confirmation." : "Add an email address to this customer first."}</small></span></label></div><p class="note">Your customer gets a private quote link with Accept and Decline buttons. Every quote email includes an unsubscribe link. Unanswered quotes get up to two text reminders, if they have given permission.</p>${isDemo() ? '<p class="note"><strong>Demo mode:</strong> no real texts or emails are sent. Open the customer link after sending to try it.</p>' : ""}`, isDemo() ? "Send demo quote" : "Send quote"));
   $("#dialog-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -593,7 +615,7 @@ async function quoteSendModal(id) {
     let failure;
     try {
       const sent = await api(`${context}/quotes/${encodeURIComponent(id)}/send`, { method: "POST", body: JSON.stringify({ channels }) });
-      if ((sent.deliveries || []).some((delivery) => channels.includes(delivery.channel) && ["failed", "unknown", "uncertain"].includes(delivery.status))) failure = new Error("Some messages could not be sent or confirmed. Check the details below.");
+      if ((sent.deliveries || []).some((delivery) => channels.includes(delivery.channel) && quoteDeliveryNeedsAttention(delivery))) failure = new Error("Some messages could not be sent or confirmed. Check the details below.");
     } catch (error) { failure = error; }
     try { await refresh(); await quoteDetail(id); } catch (error) { failure ||= error; $("#modal").close(); }
     toast(failure ? failure.message : isDemo() ? "Demo quote sent. Open the customer link to try it." : "Quote sent. Your customer can now respond.", Boolean(failure));
@@ -617,6 +639,7 @@ async function requestModal() {
     (c) =>
       c.sms_consent &&
       !c.opted_out &&
+      !c.quote_email_opted_out &&
       !state.requests.some((r) => r.contact_id === c.id && r.status !== "done"),
   );
   if (!available.length) {
@@ -756,6 +779,12 @@ document.addEventListener("click", async (e) => {
   if (!el) return;
   try {
     switch (el.dataset.action) {
+      case "confirm-email-unsubscribe":
+        if (state.config.browser_demo && location.hash === `#unsubscribe/${el.dataset.token}`) {
+          el.disabled = true;
+          await renderBrowserUnsubscribe(el.dataset.token, true);
+        }
+        break;
       case "add-business":
         businessModal();
         break;

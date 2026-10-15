@@ -31,12 +31,48 @@ function localFailure(code, message) {
   return Object.assign(new Error(message), { code });
 }
 
+function unsubscribeLink(value, allowHttp = false) {
+  if (typeof value !== "string" || value.length > 2048 ||
+      /[\s<>]/.test(value) || HEADER_CONTROLS.test(value)) {
+    throw localFailure("EEMAILINPUT", "Email details are invalid.");
+  }
+  let parsed;
+  try { parsed = new URL(value); } catch {
+    throw localFailure("EEMAILINPUT", "Email details are invalid.");
+  }
+  const localDemoHttp = allowHttp && parsed.protocol === "http:" &&
+    /^(localhost|127\.0\.0\.1|\[::1\])$/.test(parsed.hostname);
+  if ((parsed.protocol !== "https:" && !localDemoHttp) || !parsed.hostname || parsed.username ||
+      parsed.password || parsed.hash || /%0[ad]/i.test(value)) {
+    throw localFailure("EEMAILINPUT", "Email details are invalid.");
+  }
+  return parsed.href;
+}
+
+function quoteEmailFooter(businessName, unsubscribeUrl, allowHttp = false) {
+  if (typeof businessName !== "string" || !businessName.trim() || HEADER_CONTROLS.test(businessName)) {
+    throw localFailure("EEMAILINPUT", "Email details are invalid.");
+  }
+  return `Stop quote emails and texts from ${businessName}: ${unsubscribeLink(unsubscribeUrl, allowHttp)}`;
+}
+
+// Keep the stored Activity message identical to the email delivered by SMTP.
+export function buildQuoteEmailText({ businessName, customerName, url, unsubscribeUrl, allowHttp = false }) {
+  if (typeof customerName !== "string" || !customerName.trim() ||
+      HEADER_CONTROLS.test(customerName) || typeof url !== "string" || !url ||
+      HEADER_CONTROLS.test(url)) {
+    throw localFailure("EEMAILINPUT", "Email details are invalid.");
+  }
+  return `Hi ${customerName.trim().split(/\s+/)[0]},\n\nYour quote from ${businessName} is ready. View it and accept or decline here:\n${url}\n\n${businessName}\n\n${quoteEmailFooter(businessName, unsubscribeUrl, allowHttp)}`;
+}
+
 // The optional factory is for tests. SMTP settings are always server-side env.
 export async function emailTransport({
   business,
   to,
   subject,
   text,
+  unsubscribeUrl,
   createTransport = nodemailer.createTransport,
 }) {
   const config = emailConfiguration(business);
@@ -47,6 +83,10 @@ export async function emailTransport({
       typeof business.name !== "string" || HEADER_CONTROLS.test(business.name)) {
     throw localFailure("EEMAILINPUT", "Email details are invalid.");
   }
+  const unsubscribe = unsubscribeLink(unsubscribeUrl);
+  const footer = quoteEmailFooter(business.name, unsubscribe);
+  const body = text.endsWith(footer) ? text : `${text}\n\n${footer}`;
+  if (body.length > 100000) throw localFailure("EEMAILINPUT", "Email details are invalid.");
   const transport = createTransport({
     host: config.host,
     port: config.port,
@@ -72,7 +112,11 @@ export async function emailTransport({
       from: { name: business.name, address: config.from },
       to,
       subject,
-      text,
+      text: body,
+      headers: {
+        "List-Unsubscribe": `<${unsubscribe}>`,
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      },
       envelope: { from: config.from, to: [to] },
     });
     const accepted = result?.accepted?.some((address) =>

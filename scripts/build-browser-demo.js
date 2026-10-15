@@ -48,7 +48,7 @@ export function createBrowserDemo(storage) {
     if (!name || name.length > 100) throw new Error("Enter a customer name of up to 100 characters.");
     const number = phone(values.phone ?? existing.phone);
     const changed = existing.phone && number !== existing.phone;
-    return { name, phone: number, email: String(values.email ?? existing.email ?? ""), notes: String(values.notes ?? existing.notes ?? ""), tags: (Array.isArray(values.tags) ? values.tags : [values.tags || "customer"]).filter((tag) => ["lead", "customer"].includes(tag)), sms_consent: changed ? false : Boolean(values.sms_consent ?? existing.sms_consent), opted_out: Boolean(existing.opted_out) };
+    return { name, phone: number, email: String(values.email ?? existing.email ?? ""), notes: String(values.notes ?? existing.notes ?? ""), tags: (Array.isArray(values.tags) ? values.tags : [values.tags || "customer"]).filter((tag) => ["lead", "customer"].includes(tag)), sms_consent: changed ? false : Boolean(values.sms_consent ?? existing.sms_consent), opted_out: Boolean(existing.opted_out), quote_email_opted_out: Boolean(existing.quote_email_opted_out) };
   };
   const addContact = (business, values) => {
     const c = { ...contactValues(values), id: id(), business_id: business.id, created_at: now() };
@@ -58,7 +58,7 @@ export function createBrowserDemo(storage) {
   const eligible = (business, contactId) => {
     const contact = data.contacts.find((c) => c.id === String(contactId) && c.business_id === business.id);
     if (!contact) throw new Error("That customer could not be found for this business.");
-    if (!contact.sms_consent || contact.opted_out) throw new Error("This customer needs to give permission before a review text can be sent.");
+    if (!contact.sms_consent || contact.opted_out || contact.quote_email_opted_out) throw new Error("This customer needs to give permission before a review text can be sent.");
     if (data.requests.some((r) => r.business_id === business.id && r.contact_id === contact.id && r.status !== "done")) throw new Error("This customer already has an open review request.");
     return contact;
   };
@@ -84,7 +84,7 @@ export function createBrowserDemo(storage) {
       if (request.status !== "sent" || request.nudge_attempted_at || new Date(request.nudge_due_at).getTime() > Date.now()) continue;
       const business = data.businesses.find((b) => b.id === request.business_id);
       const contact = data.contacts.find((c) => c.id === request.contact_id && c.business_id === request.business_id);
-      if (!business || !contact || !contact.sms_consent || contact.opted_out || contact.phone !== request.contact_phone) continue;
+      if (!business || !contact || !contact.sms_consent || contact.opted_out || contact.quote_email_opted_out || contact.phone !== request.contact_phone) continue;
       request.nudge_attempted_at = request.nudged_at = now(); request.status = "nudged";
       log(business, contact, "sms_sent", "Follow-up nudge sent", message(business, contact, true));
       log(business, contact, "status_changed", "Request marked nudged"); count++;
@@ -134,7 +134,7 @@ export function createBrowserDemo(storage) {
       if (!file || !["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 2 * 1024 * 1024) throw new Error("Choose a PNG, JPG or WebP image under 2 MB.");
       b.logo_url = await new Promise((accept, reject) => { const reader = new FileReader(); reader.onload = () => accept(reader.result); reader.onerror = () => reject(new Error("Could not read that image.")); reader.readAsDataURL(file); }); result = b;
       log(b, null, "business_updated", "Business logo updated.");
-    } else if (parts[3] === "contacts" && method === "GET") result = contacts();
+    } else if (parts[3] === "contacts" && method === "GET") result = contacts().map((c) => ({ ...c, opted_out: Boolean(c.opted_out || c.quote_email_opted_out) }));
     else if (parts[3] === "contacts" && method === "POST") result = addContact(b, values);
     else if (parts[3] === "contacts" && method === "PATCH") {
       const c = contacts().find((x) => x.id === parts[4]);

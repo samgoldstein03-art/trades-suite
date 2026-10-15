@@ -78,7 +78,7 @@ test("quotes use existing customers and composite business isolation with exact 
   assert.equal((await f.req("POST", f.base("BETA"), { ...q, contact_id: "ALPHA-customer" })).status, 404);
   assert.throws(() => f.db.prepare("UPDATE quotes SET contact_id='BETA-customer' WHERE id=?").run(q.id), /FOREIGN KEY/);
   assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM activity WHERE business_id='BETA'").get().n, 0);
-  assert.equal(f.db.prepare("PRAGMA user_version").get().user_version, 2);
+  assert.equal(f.db.prepare("PRAGMA user_version").get().user_version, 3);
 });
 
 test("quote validation rejects unsafe money, malformed dates and customer records", async (t) => {
