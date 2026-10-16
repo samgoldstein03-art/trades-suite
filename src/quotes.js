@@ -1,5 +1,6 @@
 import express from "express";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import multer from "multer";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -310,8 +311,10 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
   function unsubscribePage(person, token) {
     const escape = (value) => String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
     const name = escape(person.unsubscribe_business_name);
+    const initials = escape(person.unsubscribe_business_name.trim().split(/\s+/).slice(0, 2).map((word) => word[0]).join(""));
     const complete = Boolean(person.quote_email_opted_out);
-    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>Message preferences — ${name}</title><link rel="stylesheet" href="/q/assets/quote.css"></head><body><main id="customer-quote"><article class="customer-quote-card quote-unavailable"><h1>${complete ? "You’re unsubscribed." : `Stop messages from ${name}?`}</h1><p>${complete ? `You won’t receive more quote emails or texts for this customer from ${name}.` : "This stops quote emails and texts for this customer. It does not change your quote or its status."}</p>${complete ? "" : `<form method="post" action="/q/unsubscribe/${token}"><input type="hidden" name="action" value="unsubscribe"><div class="customer-decision-buttons"><button type="submit">Unsubscribe</button></div></form>`}</article></main></body></html>`;
+    const icon = `<svg class="quote-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${complete ? '<path d="m6 12 4 4 8-8"/>' : '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 6 9 7 9-7"/>'}</svg>`;
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#0F172A"><title>${complete ? "Unsubscribed" : "Message preferences"} — ${name}</title><link rel="icon" type="image/svg+xml" href="/q/assets/favicon.svg"><link rel="stylesheet" href="/q/assets/fonts.css"><link rel="stylesheet" href="/q/assets/design-system.css"><link rel="stylesheet" href="/q/assets/quote.css"></head><body><main id="customer-quote"><article class="customer-quote-card quote-preferences-card${complete ? " quote-preferences-complete" : ""}"><header class="customer-business"><span class="quote-business-mark" aria-hidden="true">${initials}</span><div><strong>${name}</strong><span>Message preferences</span></div></header><section class="quote-unavailable"><span class="quote-result-mark">${icon}</span><p class="quote-reference">Your preferences</p><h1>${complete ? "You’re unsubscribed." : `Stop messages from ${name}?`}</h1><p>${complete ? `You won’t receive more quote emails or texts for this customer from ${name}.` : "This stops quote emails and texts for this customer. It does not change your quote or its status."}</p>${complete ? "" : `<form method="post" action="/q/unsubscribe/${token}"><input type="hidden" name="action" value="unsubscribe"><div class="customer-decision-buttons"><button type="submit" class="button">Unsubscribe</button></div></form>`}</section></article></main><footer class="quote-footer">Prepared with <strong>Tradesuite</strong></footer></body></html>`;
   }
   // GET is intentionally read-only: email security scanners visit links.
   // Mail clients perform the RFC 8058 one-click operation with a public POST.
@@ -340,6 +343,13 @@ export function createQuoteModule({ db, smsMode, now = () => new Date(), sendSms
   });
   publicRouter.get("/assets/quote.js", (req, res) => res.sendFile(resolve(ROOT, "public/quote.js")));
   publicRouter.get("/assets/quote.css", (req, res) => res.sendFile(resolve(ROOT, "public/quote.css")));
+  publicRouter.get("/assets/design-system.css", (req, res) => res.sendFile(resolve(ROOT, "public/design-system.css")));
+  publicRouter.get("/assets/fonts.css", (req, res) => res.type("css").send(readFileSync(resolve(ROOT, "public/fonts.css"), "utf8").replaceAll("/fonts/", "/q/assets/fonts/")));
+  publicRouter.get("/assets/fonts/:file", (req, res) => {
+    if (!["inter-variable.ttf", "sora-variable.ttf"].includes(req.params.file)) fail(404, "Font not found.");
+    res.sendFile(resolve(ROOT, "public/fonts", req.params.file));
+  });
+  publicRouter.get("/assets/favicon.svg", (req, res) => res.sendFile(resolve(ROOT, "public/favicon.svg")));
   publicRouter.get("/:token", (req, res) => { fromToken(req.params.token); res.sendFile(resolve(ROOT, "public/quote.html")); });
   publicRouter.get("/:token/logo", (req, res) => {
     const q = fromToken(req.params.token);

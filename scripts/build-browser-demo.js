@@ -169,7 +169,8 @@ export function createBrowserDemo(storage) {
 export function buildBrowserDemo(output) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   let html = readFileSync(resolve(root, "public/index.html"), "utf8");
-  let css = readFileSync(resolve(root, "public/styles.css"), "utf8").replace('@import url("/fonts.css");', "");
+  const sharedCss = readFileSync(resolve(root, "public/design-system.css"), "utf8");
+  const css = readFileSync(resolve(root, "public/styles.css"), "utf8").replace(/@import\s+url\("\/(?:fonts|design-system)\.css"\);\s*/g, "");
   const fonts = readFileSync(resolve(root, "public/fonts.css"), "utf8").replace(/url\(\/fonts\/([^)]+)\)/g, (_, file) => `url(data:font/ttf;base64,${readFileSync(resolve(root, "public/fonts", file)).toString("base64")})`);
   const quoteRenderer = readFileSync(resolve(root, "public/quote.js"), "utf8").split("async function quotePublicRequest")[0];
   // Keep the customer's standalone stylesheet from changing the admin screens.
@@ -177,7 +178,8 @@ export function buildBrowserDemo(output) {
     const match = line.match(/^(\s*)([^@{}][^{]*)\{(.*)$/);
     if (!match) return line;
     const selectors = match[2].split(",").map((selector) => [":root", "body"].includes(selector.trim()) ? ".browser-customer-quote" : `.browser-customer-quote ${selector.trim()}`).join(", ");
-    return `${match[1]}${selectors} {${match[3].replace("margin: 0; padding: 42px", "margin: 0 auto; padding: 42px")}`;
+    const declarations = match[2].trim() === "body" ? match[3].replace(/\bmargin:\s*0;/, "margin: 0 auto;").replace(/\bpadding:[^;]+;/, "padding: 0;") : match[3];
+    return `${match[1]}${selectors} {${declarations}`;
   }).join("\n");
   let app = readFileSync(resolve(root, "public/app.js"), "utf8");
   app = app.replace(/async function api\(path, options = \{\}\) \{[\s\S]*?\n\}\nfunction toast/, "async function api(path, options = {}) { return browserDemoApi(path, options); }\nfunction toast");
@@ -185,8 +187,10 @@ export function buildBrowserDemo(output) {
   app = app.replaceAll("localStorage.", "browserStorage.");
   app = app.replace("Public demo · Use sample details only. Anyone with this link can see changes. No real texts are sent.", "Browser demo · Sample data only. No real texts are sent. Changes stay in this browser. Automatic follow-ups run while this file is open.");
   const boot = `const browserStorage = (() => { const memory = new Map(); return { getItem(key) { try { return localStorage.getItem(key) ?? memory.get(key) ?? null; } catch { return memory.get(key) ?? null; } }, setItem(key, value) { memory.set(key, String(value)); try { localStorage.setItem(key, String(value)); } catch {} } }; })();\nconst browserDemoApi = (${createBrowserDemo.toString()})(browserStorage);\n`;
-  html = html.replace('<link rel="stylesheet" href="/styles.css" />', `<style>${fonts}\n${css}\n${quoteCss}</style>`).replace('<script type="module" src="/app.js"></script>', "");
-  html = html.replace("<title>Tradesuite — Good work travels</title>", '<title>Tradesuite — Browser demo</title>\n<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data:; font-src data:; connect-src \'none\'; form-action \'none\'; base-uri \'none\'">');
+  const favicon = `data:image/svg+xml;base64,${readFileSync(resolve(root, "public/favicon.svg")).toString("base64")}`;
+  html = html.replace('<link rel="stylesheet" href="/styles.css" />', `<style>${fonts}\n${sharedCss}\n${css}\n${quoteCss}</style>`).replace('<script type="module" src="/app.js"></script>', "");
+  html = html.replace('href="/favicon.svg"', `href="${favicon}"`);
+  html = html.replace(/<title>[^<]*<\/title>/, '<title>Overview — Tradesuite demo</title>\n<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data:; font-src data:; connect-src \'none\'; form-action \'none\'; base-uri \'none\'">');
   html = html.replace("</body>", `<script>${(`const createBrowserQuotes = ${createBrowserQuotes.toString()};\n` + boot + quoteRenderer + app).replace(/<\/script/gi, "<\\/script")}</script>\n</body>`);
   const target = output ? resolve(output) : resolve(root, "Tradesuite Demo.html");
   mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, html);

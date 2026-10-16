@@ -3,8 +3,8 @@ $taskRoot = Split-Path -Parent $PSScriptRoot
 $taskStatePath = Join-Path $taskRoot '.publish/free-demo-publication.json'
 $taskFiles = @(
   @{ path = 'index.html'; local = (Join-Path $taskRoot 'Tradesuite Demo.html'); contentType = 'text/html; charset=utf-8' },
-  @{ path = 'licenses/DM-Sans-LICENSE.txt'; local = (Join-Path $taskRoot 'public/fonts/DM-Sans-LICENSE.txt'); contentType = 'text/plain; charset=utf-8' },
-  @{ path = 'licenses/Manrope-LICENSE.txt'; local = (Join-Path $taskRoot 'public/fonts/Manrope-LICENSE.txt'); contentType = 'text/plain; charset=utf-8' }
+  @{ path = 'licenses/Inter-LICENSE.txt'; local = (Join-Path $taskRoot 'public/fonts/Inter-LICENSE.txt'); contentType = 'text/plain; charset=utf-8' },
+  @{ path = 'licenses/Sora-LICENSE.txt'; local = (Join-Path $taskRoot 'public/fonts/Sora-LICENSE.txt'); contentType = 'text/plain; charset=utf-8' }
 )
 $null = New-Item -ItemType Directory -Force -Path (Join-Path $taskRoot '.publish')
 $taskHeaders = @{ 'X-HereNow-Client' = 'codex/direct-api' }

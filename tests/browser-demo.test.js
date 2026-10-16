@@ -246,7 +246,12 @@ test("browser demo works when storage is unavailable and generated frontend requ
     assert.ok(html.includes("Browser demo · Sample data only."));
     assert.ok(!html.includes("await fetch("));
     assert.ok(!/<script[^>]+src=/.test(html));
-    assert.ok(!/<link[^>]+href=/.test(html));
+    assert.ok(!/<link[^>]+href="(?!data:)/.test(html));
+    assert.match(html, /<link rel="icon"[^>]+href="data:image\/svg\+xml;base64,/);
+    assert.ok(!html.includes("@import"));
+    assert.match(html, /font-family: "Inter"/);
+    assert.match(html, /font-family: "Sora"/);
+    assert.match(html, /--color-bg: #fafaf9/);
     const embeddedScript = html.match(/<script>([\s\S]*?)<\/script>/)[1];
     assert.doesNotThrow(() => new Script(embeddedScript));
   } finally { unlinkSync(join(temporary, "demo.html")); rmdirSync(temporary); }

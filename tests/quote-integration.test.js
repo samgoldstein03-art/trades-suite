@@ -185,3 +185,30 @@ test("a provider acceptance across expiry keeps the customer link usable without
   assert.equal(activity.filter((item) => item.kind === "quote_status" && item.label.endsWith(" sent")).length, 0);
   assert.equal(f.sms.length, 1);
 });
+
+test("invalid public customer documents have a designed HTML error while API error contracts stay JSON", async (t) => {
+  const f = await fixture(t);
+  for (const path of ["/q/not-a-quote", "/q/unsubscribe/not-a-preference-link"]) {
+    const page = await f.request("GET", path, undefined, { authenticated: false, headers: { accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8" } });
+    assert.equal(page.status, 404);
+    assert.match(page.headers["content-type"], /^text\/html/);
+    assert.match(page.raw, /<title>Link unavailable — Tradesuite<\/title>/);
+    assert.match(page.raw, /This link couldn’t be opened/);
+    assert.match(page.raw, /\/q\/assets\/design-system\.css/);
+    assert.match(page.raw, /\/q\/assets\/favicon\.svg/);
+    assert.equal(page.headers["www-authenticate"], undefined);
+    const head = await f.request("HEAD", path, undefined, { authenticated: false, headers: { accept: "text/html" } });
+    assert.equal(head.status, 404); assert.equal(head.raw, ""); assert.match(head.headers["content-type"], /^text\/html/);
+    for (const accept of [undefined, "*/*", "application/json", "text/html;q=0,application/json"]) {
+      const api = await f.request("GET", path, undefined, { authenticated: false, headers: accept ? { accept } : {} });
+      assert.equal(api.status, 404); assert.equal(typeof api.data.error, "string");
+      assert.doesNotMatch(api.raw, /<!doctype html>/i, `Original JSON error payload for ${path} with Accept ${accept}`);
+    }
+  }
+  for (const path of ["/q/not-a-quote/data", "/q/unsubscribe/not-a-preference-link/data"]) {
+    const data = await f.request("GET", path, undefined, { authenticated: false, headers: { accept: "text/html" } });
+    assert.equal(data.status, 404); assert.match(data.headers["content-type"], /^application\/json/);
+  }
+  const response = await f.request("POST", "/q/not-a-quote/respond", { decision: "accepted" }, { authenticated: false, headers: { accept: "text/html" } });
+  assert.equal(response.status, 404); assert.match(response.headers["content-type"], /^application\/json/);
+});

@@ -1157,8 +1157,19 @@ export function createApp({
               ? "Choose a logo smaller than 2 MB."
               : "Upload one logo image at a time.",
         });
-    if (error instanceof AppError || error instanceof QuoteError)
+    if (error instanceof AppError || error instanceof QuoteError) {
+      // Browser document requests get the same error in the customer visual
+      // language. Data requests and clients accepting */* keep their JSON API.
+      const customerDocument = ["GET", "HEAD"].includes(req.method)
+        && /^\/q\/(?:unsubscribe\/)?[^/]+\/?$/.test(req.path)
+        && /(?:^|,)\s*text\/html\s*(?:;|,|$)/i.test(req.get("Accept") || "")
+        && req.accepts("html");
+      if (customerDocument) {
+        const message = error.message.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
+        return res.status(error.status).type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="robots" content="noindex,nofollow"><title>Link unavailable — Tradesuite</title><link rel="icon" type="image/svg+xml" href="/q/assets/favicon.svg"><link rel="stylesheet" href="/q/assets/fonts.css"><link rel="stylesheet" href="/q/assets/design-system.css"><link rel="stylesheet" href="/q/assets/quote.css"></head><body><main id="customer-quote"><article class="customer-quote-card quote-preferences-card"><header class="customer-business"><span class="quote-business-mark" aria-hidden="true">TS</span><div><strong>Tradesuite</strong><span>Customer messages</span></div></header><section class="quote-unavailable"><span class="quote-result-mark"><svg class="quote-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h8l4 4v14H5V3h2zm7 0v5h5M8 12h8m-8 4h6"/></svg></span><p class="quote-reference">Link unavailable</p><h1>This link couldn’t be opened.</h1><p>${message}</p><p>Please check the link or ask the business that sent it for a new one.</p></section></article></main><footer class="quote-footer">Prepared with <strong>Tradesuite</strong></footer></body></html>`);
+      }
       return res.status(error.status).json({ error: error.message });
+    }
     if (error?.type === "entity.parse.failed")
       return res
         .status(400)

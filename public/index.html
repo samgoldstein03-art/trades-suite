@@ -3,12 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="theme-color" content="#184c3f" />
+    <meta name="theme-color" content="#0F172A" />
     <meta
       name="description"
-      content="A little help turning happy customers into your next job."
+      content="Your customers, quotes and review requests. A clear view of the next job."
     />
-    <title>Tradesuite — Good work travels</title>
+    <title>Overview — Tradesuite</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/styles.css" />
     <script type="module" src="/app.js"></script>
   </head>
@@ -20,8 +21,9 @@
           ><span>tradesuite<span class="brand-dot">.</span></span></a
         >
         <div class="business-switch">
-          <label for="business-select">YOUR BUSINESS</label
-          ><select id="business-select" aria-label="Choose business">
+          <div id="business-identity" class="business-identity"></div>
+          <label class="sr-only" for="business-select">Your business</label>
+          <select id="business-select" aria-label="Choose business">
             <option>Loading…</option></select
           ><button class="text-button add-business" data-action="add-business">
             + Add a business
@@ -29,9 +31,6 @@
         </div>
         <nav aria-label="Main navigation" id="main-nav"></nav>
         <div class="sidebar-bottom">
-          <div class="little-stars">✦ &nbsp;✧ &nbsp;✦</div>
-          <strong>Good work travels.</strong>
-          <p>Make it easier for happy<br />customers to spread the word.</p>
           <div class="admin-account">
             <span class="avatar small">A</span
             ><span><b>Your workspace</b><small>Admin access</small></span
@@ -51,10 +50,20 @@
         </header>
         <div id="public-demo-notice" class="public-demo-notice" hidden></div>
         <main id="main" tabindex="-1">
-          <div class="loading">Getting things ready…</div>
+          <div class="loading-skeleton" role="status" aria-label="Loading your workspace">
+            <span class="skeleton skeleton-heading" aria-hidden="true"></span>
+            <div class="kpi-grid" aria-hidden="true">
+              <div class="kpi-card"><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-number"></span><span class="skeleton skeleton-line short"></span></div>
+              <div class="kpi-card"><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-number"></span><span class="skeleton skeleton-line short"></span></div>
+              <div class="kpi-card"><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-number"></span><span class="skeleton skeleton-line short"></span></div>
+              <div class="kpi-card"><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-number"></span><span class="skeleton skeleton-line short"></span></div>
+            </div>
+            <div class="panel skeleton-panel" aria-hidden="true"><span class="skeleton skeleton-line short"></span><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-line"></span></div>
+            <span class="sr-only">Loading your workspace…</span>
+          </div>
         </main>
         <footer class="page-footer">
-          <span>Made for the people who get the job done.</span
+          <span>A clear view of your next job.</span
           ><span>Tradesuite · Reviews & quotes</span>
         </footer>
       </div>

@@ -4,6 +4,8 @@ A simple customer desk for HVAC, plumbing, and electrical shops. Pick a business
 
 This repository implements **Phases 1 and 2** using **Node.js, Express, and SQLite**, with a plain HTML/CSS/JavaScript interface. It has one admin workspace shared across businesses. Hosted installations require one admin password; there are no separate business accounts. Customer quote pages need no login.
 
+The interface uses a shared slate-and-emerald design system, locally served Inter and Sora fonts, and responsive layouts for the admin workspace and customer pages. See [DESIGN_NOTES.md](DESIGN_NOTES.md) for the screen inventory, dashboard metric definitions, and both design review passes.
+
 ## Start locally
 
 **Want to see the interface without starting a server?** After the install commands below, run `npm run build:browser-demo` and open the generated **Tradesuite Demo.html** file directly in Chrome or Edge. It contains the same interface with a separate browser-only sample workspace. You can add businesses and customers, simulate review requests, test a three-day nudge, and mark requests done. It does not send SMS, connect to Twilio, or use the server's SQLite database. Changes stay in that browser when browser storage is available. This file is a preview, not a hosted deployment of the full app.
