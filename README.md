@@ -6,6 +6,20 @@ This repository implements **Phases 1 and 2** using **Node.js, Express, and SQLi
 
 The interface uses a shared slate-and-emerald design system, locally served Inter and Sora fonts, and responsive layouts for the admin workspace and customer pages. See [DESIGN_NOTES.md](DESIGN_NOTES.md) for the screen inventory, dashboard metric definitions, and both design review passes.
 
+The pilot presentation audit is in [PILOT_AUDIT.md](PILOT_AUDIT.md). It records all 30 checks, the scoped presentation fixes, and the owner content still needed. `/terms` and `/privacy` are public **owner-review drafts** containing completion checklists, not final legal documents. Their links are deliberately labelled **Terms draft** and **Privacy draft**. Supply reviewed documents before collecting real pilot customer data. No testimonials or customer-result claims have been added.
+
+## Demonstrate the actual app
+
+Use `npm run demo` for a pilot walkthrough of the real Express server and SQLite database. This runs the installed product with the existing labelled sample workspace and simulated delivery. The separate `npm run build:browser-demo` output is a browser-only interface preview; it does not exercise Express, SQLite, Twilio, or SMTP.
+
+1. Start `npm run demo` and open the local address printed in the terminal. Use sample information only; no real messages are sent. To isolate a pilot walkthrough from another demo, set `DEMO_DATABASE_PATH` to a separate file such as `data/pilot-demo.sqlite` before starting it.
+2. Open Quotes, create a quote for an existing sample contact, and save it. Send by text, email, or both. Confirm that the delivery history says **Simulated**.
+3. Open the customer link in a separate browser tab, check the work and total, and accept or decline this sample quote. Confirm the recorded response in Quotes and Activity in the owner workspace.
+4. Create a second unanswered quote and use its demo reminder controls to test the day-2 and day-5 sequence. Check the delivery history and stop-reminders control. Follow the review-request demo steps below to check its single three-day reminder.
+5. Restart the demo on the same port and database file to confirm the saved records remain. Check both draft document links and review their owner-completion questions.
+
+This is a working product demonstration with simulated providers. It does not verify a publicly hosted installation or real message delivery. Before a real-data pilot, the owner still needs reviewed legal documents, an appropriate running installation, and a consenting test of each business's actual SMS/email sending and opt-out setup. Missed-call text-back remains planned.
+
 ## Start locally
 
 **Want to see the interface without starting a server?** After the install commands below, run `npm run build:browser-demo` and open the generated **Tradesuite Demo.html** file directly in Chrome or Edge. It contains the same interface with a separate browser-only sample workspace. You can add businesses and customers, simulate review requests, test a three-day nudge, and mark requests done. It does not send SMS, connect to Twilio, or use the server's SQLite database. Changes stay in that browser when browser storage is available. This file is a preview, not a hosted deployment of the full app.
@@ -250,7 +264,7 @@ Keep the unsubscribe endpoint reachable through the public HTTPS host used for c
 
 Run one app instance for a workspace and use persistent local storage. The default data directory and `.env` are excluded from Git. For a simple consistent backup, stop the server, copy the database and its existing companion files together with the uploads folder to private backup storage, and restart. Restore them together. Store a separate protected backup of the environment configuration; it contains secrets. Do not remove the database to clear a warning or retry an uncertain message.
 
-This app has **one admin view and no per-business logins**. Private localhost use can run without a password. A hosted installation requires `ADMIN_PASSWORD` and an HTTPS admin origin; the app refuses to start without them. Browser HTTP Basic authentication protects the admin pages, API, and uploaded logos using `ADMIN_USERNAME` and `ADMIN_PASSWORD`. Customer quote links, their public decision endpoints, `/healthz`, and the signed Twilio webhook remain reachable without that password.
+This app has **one admin view and no per-business logins**. Private localhost use can run without a password. A hosted installation requires `ADMIN_PASSWORD` and an HTTPS admin origin; the app refuses to start without them. Browser HTTP Basic authentication protects the admin pages, API, and uploaded logos using `ADMIN_USERNAME` and `ADMIN_PASSWORD`. Customer quote links, their public decision endpoints, `/healthz`, and the signed Twilio webhook remain reachable without that password. The owner-review drafts at `/terms` and `/privacy`, plus `/legal.css`, are also publicly readable by GET/HEAD; admin data and uploads remain protected.
 
 API requests are limited to **300 per five minutes per IP address**. The shared admin sign-in has a stricter limit of **10 failed attempts per 15 minutes per IP address**, covering pages, API routes, and uploads. Successful sign-ins do not consume that failed-attempt allowance, but once it is exhausted even correct credentials must wait for the window to reset. A blocked request returns HTTP 429 with a `Retry-After` header. Counters are held in memory and reset when the process restarts; this matches the single-instance deployment below.
 

@@ -192,7 +192,7 @@ test("invalid public customer documents have a designed HTML error while API err
     const page = await f.request("GET", path, undefined, { authenticated: false, headers: { accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8" } });
     assert.equal(page.status, 404);
     assert.match(page.headers["content-type"], /^text\/html/);
-    assert.match(page.raw, /<title>Link unavailable — Tradesuite<\/title>/);
+    assert.match(page.raw, /<title>Link unavailable \| Tradesuite<\/title>/);
     assert.match(page.raw, /This link couldn’t be opened/);
     assert.match(page.raw, /\/q\/assets\/design-system\.css/);
     assert.match(page.raw, /\/q\/assets\/favicon\.svg/);

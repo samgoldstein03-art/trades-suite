@@ -1,3 +1,5 @@
+> Pilot presentation update, 2026-11-05: shared panels now use 4px corners and no drop shadows; decorative icons and broad pastel fills were reduced. Typography, palette, layouts and workflows are retained. See [PILOT_AUDIT.md](PILOT_AUDIT.md) for the current 30-item audit and owner-review drafts. The design review below records the earlier implementation.
+
 # Tradesuite design overhaul
 
 ## Screen inventory before implementation

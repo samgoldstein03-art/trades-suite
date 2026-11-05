@@ -169,6 +169,14 @@ export function createBrowserDemo(storage) {
 export function buildBrowserDemo(output) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   let html = readFileSync(resolve(root, "public/index.html"), "utf8");
+  // Embed the actual owner-review documents; the standalone preview does not fetch pages.
+  const browserLegalDocuments = Object.fromEntries(["terms", "privacy"].map((kind) => {
+    const source = readFileSync(resolve(root, `public/${kind}.html`), "utf8");
+    const body = source.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1];
+    if (!body) throw new Error(`Missing draft document body: ${kind}`);
+    return [kind, body.replace(/<main\b/g, "<article").replace(/<\/main>/g, "</article>").replace(/href="\/(terms|privacy)"/g, 'href="#$1"')];
+  }));
+  const legalCss = readFileSync(resolve(root, "public/legal.css"), "utf8");
   const sharedCss = readFileSync(resolve(root, "public/design-system.css"), "utf8");
   const css = readFileSync(resolve(root, "public/styles.css"), "utf8").replace(/@import\s+url\("\/(?:fonts|design-system)\.css"\);\s*/g, "");
   const fonts = readFileSync(resolve(root, "public/fonts.css"), "utf8").replace(/url\(\/fonts\/([^)]+)\)/g, (_, file) => `url(data:font/ttf;base64,${readFileSync(resolve(root, "public/fonts", file)).toString("base64")})`);
@@ -188,10 +196,11 @@ export function buildBrowserDemo(output) {
   app = app.replace("Public demo · Use sample details only. Anyone with this link can see changes. No real texts are sent.", "Browser demo · Sample data only. No real texts are sent. Changes stay in this browser. Automatic follow-ups run while this file is open.");
   const boot = `const browserStorage = (() => { const memory = new Map(); return { getItem(key) { try { return localStorage.getItem(key) ?? memory.get(key) ?? null; } catch { return memory.get(key) ?? null; } }, setItem(key, value) { memory.set(key, String(value)); try { localStorage.setItem(key, String(value)); } catch {} } }; })();\nconst browserDemoApi = (${createBrowserDemo.toString()})(browserStorage);\n`;
   const favicon = `data:image/svg+xml;base64,${readFileSync(resolve(root, "public/favicon.svg")).toString("base64")}`;
-  html = html.replace('<link rel="stylesheet" href="/styles.css" />', `<style>${fonts}\n${sharedCss}\n${css}\n${quoteCss}</style>`).replace('<script type="module" src="/app.js"></script>', "");
+  html = html.replace('<link rel="stylesheet" href="/styles.css" />', `<style>${fonts}\n${sharedCss}\n${css}\n${quoteCss}\n${legalCss}</style>`).replace('<script type="module" src="/app.js"></script>', "");
   html = html.replace('href="/favicon.svg"', `href="${favicon}"`);
-  html = html.replace(/<title>[^<]*<\/title>/, '<title>Overview — Tradesuite demo</title>\n<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data:; font-src data:; connect-src \'none\'; form-action \'none\'; base-uri \'none\'">');
-  html = html.replace("</body>", `<script>${(`const createBrowserQuotes = ${createBrowserQuotes.toString()};\n` + boot + quoteRenderer + app).replace(/<\/script/gi, "<\\/script")}</script>\n</body>`);
+  html = html.replace(/<title>[^<]*<\/title>/, '<title>Overview | Tradesuite demo</title>\n<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data:; font-src data:; connect-src \'none\'; form-action \'none\'; base-uri \'none\'">');
+  html = html.replace("</body>", `<script>${(`const browserLegalDocuments = ${JSON.stringify(browserLegalDocuments)};\nconst createBrowserQuotes = ${createBrowserQuotes.toString()};\n` + boot + quoteRenderer + app).replace(/<\/script/gi, "<\\/script")}</script>\n</body>`);
+  html = html.replace(/href="\/(terms|privacy)"/g, 'href="#$1"');
   const target = output ? resolve(output) : resolve(root, "Tradesuite Demo.html");
   mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, html);
   return target;

@@ -198,6 +198,8 @@ test("customer acceptance prevents duplicate submissions and renders the immedia
   context.resolveSend({ ...quote, status: "accepted", can_respond: false });
   await sent;
   assert.match(main.innerHTML, /You’re all set/);
+  assert.match(main.innerHTML, /Your acceptance is recorded/);
+  assert.doesNotMatch(main.innerHTML, /They’ll be in touch/, "recording a response must not promise an unimplemented notification or callback");
   assert.ok(!main.innerHTML.includes('data-decision="accepted"'));
 });
 

@@ -302,7 +302,7 @@ export function createApp({
     return failure;
   }
 
-  // Health and signature-verified Twilio callbacks are the only public routes.
+  // Public routes below are explicit; the admin workspace stays behind its gate.
   app.disable("x-powered-by");
   app.use((req, res, next) => {
     res.set("X-Content-Type-Options", "nosniff");
@@ -389,6 +389,15 @@ export function createApp({
     res.set("Cache-Control", "no-store").json({ status: "ok" });
   });
   app.use("/q", createApiRateLimit(), express.json({ limit: "8kb" }), quotes.publicRouter);
+  app.get("/terms", (req, res) => {
+    res.set("Cache-Control", "no-store").sendFile(resolve(ROOT, "public/terms.html"));
+  });
+  app.get("/privacy", (req, res) => {
+    res.set("Cache-Control", "no-store").sendFile(resolve(ROOT, "public/privacy.html"));
+  });
+  app.get("/legal.css", (req, res) => {
+    res.sendFile(resolve(ROOT, "public/legal.css"));
+  });
   app.use("/api", createApiRateLimit());
   app.use(admin.middleware);
 
@@ -1166,7 +1175,7 @@ export function createApp({
         && req.accepts("html");
       if (customerDocument) {
         const message = error.message.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
-        return res.status(error.status).type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="robots" content="noindex,nofollow"><title>Link unavailable — Tradesuite</title><link rel="icon" type="image/svg+xml" href="/q/assets/favicon.svg"><link rel="stylesheet" href="/q/assets/fonts.css"><link rel="stylesheet" href="/q/assets/design-system.css"><link rel="stylesheet" href="/q/assets/quote.css"></head><body><main id="customer-quote"><article class="customer-quote-card quote-preferences-card"><header class="customer-business"><span class="quote-business-mark" aria-hidden="true">TS</span><div><strong>Tradesuite</strong><span>Customer messages</span></div></header><section class="quote-unavailable"><span class="quote-result-mark"><svg class="quote-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h8l4 4v14H5V3h2zm7 0v5h5M8 12h8m-8 4h6"/></svg></span><p class="quote-reference">Link unavailable</p><h1>This link couldn’t be opened.</h1><p>${message}</p><p>Please check the link or ask the business that sent it for a new one.</p></section></article></main><footer class="quote-footer">Prepared with <strong>Tradesuite</strong></footer></body></html>`);
+        return res.status(error.status).type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="robots" content="noindex,nofollow"><title>Link unavailable | Tradesuite</title><link rel="icon" type="image/svg+xml" href="/q/assets/favicon.svg"><link rel="stylesheet" href="/q/assets/fonts.css"><link rel="stylesheet" href="/q/assets/design-system.css"><link rel="stylesheet" href="/q/assets/quote.css"></head><body><main id="customer-quote"><article class="customer-quote-card quote-preferences-card"><header class="customer-business"><span class="quote-business-mark" aria-hidden="true">TS</span><div><strong>Tradesuite</strong><span>Customer messages</span></div></header><section class="quote-unavailable"><p class="quote-reference">Link unavailable</p><h1>This link couldn’t be opened.</h1><p>${message}</p><p>Please check the link or ask the business that sent it for a new one.</p></section></article></main><footer class="quote-footer">Prepared with <strong>Tradesuite</strong><nav class="document-links" aria-label="Draft documents"><a href="/terms">Terms draft</a><a href="/privacy">Privacy draft</a></nav></footer></body></html>`);
       }
       return res.status(error.status).json({ error: error.message });
     }
