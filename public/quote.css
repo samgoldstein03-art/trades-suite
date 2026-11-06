@@ -12,35 +12,35 @@ a { color: var(--color-action); text-underline-offset: var(--space-1); }
 .customer-business > div { min-width: 0; }
 .customer-business img { width: var(--quote-brand-size); height: var(--quote-brand-size); border-radius: var(--radius-md); object-fit: contain; flex: 0 0 auto; }
 .customer-business strong { font-size: var(--text-base); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); overflow-wrap: anywhere; }
-.customer-business div > span { display: block; margin-top: var(--space-1); font-size: var(--text-xs); color: var(--color-muted); }
-.quote-business-mark { display: grid; place-items: center; width: var(--quote-brand-size); height: var(--quote-brand-size); flex-shrink: 0; border-radius: var(--radius-md); color: var(--color-white); background: var(--color-sidebar); font-family: var(--font-display); font-size: var(--text-base); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+.customer-business div > span { display: block; margin-top: var(--space-1); font-size: var(--text-xs); color: var(--color-muted-strong); }
+.quote-business-mark { display: grid; place-items: center; width: var(--quote-brand-size); height: var(--quote-brand-size); flex-shrink: 0; border-radius: var(--radius-md); color: var(--color-white); background: var(--color-primary); font-family: var(--font-display); font-size: var(--text-base); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
 .quote-intro { padding: var(--space-8) var(--quote-padding); }
 .quote-intro-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-4); margin-bottom: var(--space-6); }
-.quote-reference { margin: 0; font-size: var(--text-xs); font-weight: var(--weight-semibold); letter-spacing: var(--quote-reference-spacing); text-transform: uppercase; color: var(--color-muted); }
+.quote-reference { margin: 0; font-size: var(--text-xs); font-weight: var(--weight-semibold); letter-spacing: var(--quote-reference-spacing); text-transform: uppercase; color: var(--color-muted-strong); }
 .quote-intro h1 { font-family: var(--font-display); font-size: var(--text-3xl); font-weight: var(--weight-semibold); letter-spacing: var(--quote-letter-spacing); line-height: var(--leading-tight); margin: 0 0 var(--space-4); }
-.quote-intro > p { margin: 0; font-size: var(--text-sm); line-height: var(--leading-relaxed); color: var(--color-muted); }
+.quote-intro > p { margin: 0; font-size: var(--text-sm); line-height: var(--leading-relaxed); color: var(--color-muted-strong); }
 .quote-intro > p strong { color: var(--color-ink); font-weight: var(--weight-medium); }
-.quote-validity { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--color-muted-surface); color: var(--color-muted); font-size: var(--text-xs); line-height: var(--leading-normal); }
+.quote-validity { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--color-muted-surface); color: var(--color-muted-strong); font-size: var(--text-xs); line-height: var(--leading-normal); }
 .customer-line-items { padding: 0 var(--quote-padding); }
-.customer-items-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding-bottom: var(--space-3); border-bottom: var(--quote-border-width) solid var(--color-line); font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--color-muted); }
+.customer-items-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding-bottom: var(--space-3); border-bottom: var(--quote-border-width) solid var(--color-line); font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--color-muted-strong); }
 .customer-line-item { display: flex; justify-content: space-between; gap: var(--space-6); padding: var(--space-6) 0; border-bottom: var(--quote-border-width) solid var(--color-line); }
 .customer-line-item > div { min-width: 0; }
 .customer-line-item h2 { font-family: var(--font-body); font-size: var(--text-sm); font-weight: var(--weight-semibold); line-height: var(--leading-normal); letter-spacing: normal; overflow-wrap: anywhere; margin: 0; }
-.customer-line-item p { font-size: var(--text-xs); font-variant-numeric: tabular-nums; color: var(--color-muted); margin: var(--space-2) 0 0; }
+.customer-line-item p { font-size: var(--text-xs); font-variant-numeric: tabular-nums; color: var(--color-muted-strong); margin: var(--space-2) 0 0; }
 .customer-line-item > strong { white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: var(--weight-semibold); font-size: var(--text-sm); }
 .customer-totals { width: var(--quote-totals-width); max-width: 100%; margin: var(--space-6) 0 var(--space-8) auto; padding: 0 var(--quote-padding); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
-.customer-totals > div { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-2) 0; color: var(--color-muted); }
+.customer-totals > div { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-2) 0; color: var(--color-muted-strong); }
 .customer-totals > div > strong { font-weight: var(--weight-medium); color: var(--color-ink); }
 .customer-totals .customer-total { display: block; border-top: var(--quote-border-width) solid var(--color-line); margin-top: var(--space-4); padding-top: var(--space-6); text-align: right; color: var(--color-ink); }
 .customer-total > span { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); font-size: var(--text-sm); font-weight: var(--weight-medium); }
-.customer-total small { font-size: var(--text-xs); font-weight: var(--weight-normal); color: var(--color-muted); }
+.customer-total small { font-size: var(--text-xs); font-weight: var(--weight-normal); color: var(--color-muted-strong); }
 .customer-totals .customer-total > strong { display: block; margin-top: var(--space-2); font-family: var(--font-display); font-size: var(--text-3xl); font-weight: var(--weight-semibold); letter-spacing: var(--quote-letter-spacing); line-height: var(--leading-tight); overflow-wrap: anywhere; }
 .customer-notes { margin: 0 var(--quote-padding) var(--space-8); padding: var(--space-6); background: var(--color-muted-surface); border-radius: var(--radius-md); }
 .customer-notes h2 { margin: 0 0 var(--space-2); font-family: var(--font-body); font-size: var(--text-xs); font-weight: var(--weight-semibold); letter-spacing: normal; }
-.customer-notes p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-sm); line-height: var(--leading-relaxed); color: var(--color-muted); margin: 0; }
+.customer-notes p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-sm); line-height: var(--leading-relaxed); color: var(--color-muted-strong); margin: 0; }
 .customer-decision { padding: var(--space-8) var(--quote-padding); border-top: var(--quote-border-width) solid var(--color-line); }
 .customer-decision h2 { margin: 0 0 var(--space-2); font-family: var(--font-display); font-weight: var(--weight-semibold); font-size: var(--text-xl); letter-spacing: var(--tracking-tight); line-height: var(--leading-tight); }
-.customer-decision p { font-size: var(--text-sm); line-height: var(--leading-relaxed); color: var(--color-muted); margin: 0; }
+.customer-decision p { font-size: var(--text-sm); line-height: var(--leading-relaxed); color: var(--color-muted-strong); margin: 0; }
 .customer-decision-buttons { display: flex; gap: var(--space-3); margin-top: var(--space-6); }
 .customer-decision-buttons .button { min-height: var(--touch-target); display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); padding: var(--space-3) var(--space-6); text-decoration: none; }
 .customer-decision-buttons .button:first-child { flex: 1; }
@@ -50,14 +50,14 @@ a { color: var(--color-action); text-underline-offset: var(--space-1); }
 .customer-decision.expired { background: var(--color-surface); }
 .customer-decision.expired h2 { color: var(--color-warning); }
 .customer-contact { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; padding: var(--space-4) var(--quote-padding); border-top: var(--quote-border-width) solid var(--color-line); font-size: var(--text-xs); }
-.customer-contact > span { color: var(--color-muted); }
+.customer-contact > span { color: var(--color-muted-strong); }
 .customer-contact > div { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
 .customer-contact .text-button { min-height: var(--touch-target); display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); font-weight: var(--weight-medium); text-decoration: none; padding: var(--space-2) 0; }
-.quote-footer { font-size: var(--text-xs); color: var(--color-muted); text-align: center; margin: var(--space-6) 0 0; }
+.quote-footer { font-size: var(--text-xs); color: var(--color-muted-strong); text-align: center; margin: var(--space-6) 0 0; }
 .quote-footer strong { color: var(--color-ink); font-weight: var(--weight-medium); }
 .quote-unavailable { padding: var(--space-12) var(--quote-padding); }
 .quote-unavailable h1 { margin: var(--space-4) 0; font-family: var(--font-display); font-size: var(--text-2xl); font-weight: var(--weight-semibold); line-height: var(--leading-tight); letter-spacing: var(--quote-letter-spacing); }
-.quote-unavailable > p { line-height: var(--leading-relaxed); font-size: var(--text-sm); color: var(--color-muted); margin: var(--space-4) 0 0; }
+.quote-unavailable > p { line-height: var(--leading-relaxed); font-size: var(--text-sm); color: var(--color-muted-strong); margin: var(--space-4) 0 0; }
 .quote-unavailable > .quote-reference { font-size: var(--text-xs); margin-top: 0; }
 .quote-preferences-card .customer-business { border-bottom: var(--quote-border-width) solid var(--color-line); }
 .quote-preferences-card .quote-unavailable { max-width: var(--quote-width); }

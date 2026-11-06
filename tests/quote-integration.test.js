@@ -88,6 +88,27 @@ async function fixture(t, options = {}) {
   };
 }
 
+test("public customer and draft pages can load every active self-hosted brand font without admin access", async (t) => {
+  const f = await fixture(t);
+  const stylesheet = await f.request("GET", "/q/assets/fonts.css", undefined, { authenticated: false });
+  assert.equal(stylesheet.status, 200);
+  assert.match(stylesheet.raw, /font-family: "DM Sans"/);
+  assert.match(stylesheet.raw, /font-family: "Manrope"/);
+  assert.doesNotMatch(stylesheet.raw, /font-family: "(?:Inter|Geist|Space Grotesk|Sora)"/);
+  const paths = [...new Set([...stylesheet.raw.matchAll(/url\((\/q\/assets\/fonts\/[^)]+)\)/g)].map((match) => match[1]))];
+  assert.ok(paths.length > 0, "the public stylesheet contains local font URLs");
+  for (const path of paths) {
+    // HEAD exercises auth, the allowlist and sendFile stat without buffering font binaries in this in-memory HTTP fixture.
+    const font = await f.request("HEAD", path, undefined, { authenticated: false });
+    assert.equal(font.status, 200, path);
+    assert.equal(font.headers["www-authenticate"], undefined, path);
+    assert.match(font.headers["content-type"], /^font\/ttf/, path);
+    assert.ok(Number(font.headers["content-length"]) > 0, path);
+  }
+  const unlisted = await f.request("GET", "/q/assets/fonts/not-a-font.txt", undefined, { authenticated: false });
+  assert.equal(unlisted.status, 404, "only the explicit public font assets are exposed");
+});
+
 test("hosted quote journey keeps admin protected and customer viewing and acceptance public", async (t) => {
   const f = await fixture(t);
   const alpha = await f.business(); const person = await f.contact(alpha);

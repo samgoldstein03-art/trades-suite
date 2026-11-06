@@ -4,9 +4,9 @@ A simple customer desk for HVAC, plumbing, and electrical shops. Pick a business
 
 This repository implements **Phases 1 and 2** using **Node.js, Express, and SQLite**, with a plain HTML/CSS/JavaScript interface. It has one admin workspace shared across businesses. Hosted installations require one admin password; there are no separate business accounts. Customer quote pages need no login.
 
-The interface uses a shared slate-and-emerald design system, locally served Inter and Sora fonts, and responsive layouts for the admin workspace and customer pages. See [DESIGN_NOTES.md](DESIGN_NOTES.md) for the screen inventory, dashboard metric definitions, and both design review passes.
+The interface keeps the original warm green design system: background #f6f7f3, ink #243d34, deep-green #184c3f actions, lime #daecbb and orange #ce723a accents, white sidebar, 16px panels, and self-hosted DM Sans/Manrope fonts. See [DESIGN_NOTES.md](DESIGN_NOTES.md) for current screen and measurement notes.
 
-The pilot presentation audit is in [PILOT_AUDIT.md](PILOT_AUDIT.md). It records all 30 checks, the scoped presentation fixes, and the owner content still needed. `/terms` and `/privacy` are public **owner-review drafts** containing completion checklists, not final legal documents. Their links are deliberately labelled **Terms draft** and **Privacy draft**. Supply reviewed documents before collecting real pilot customer data. No testimonials or customer-result claims have been added.
+The pilot presentation audit is in [PILOT_AUDIT.md](PILOT_AUDIT.md). It records all 30 checks, the scoped presentation fixes, and the owner content still needed. `/terms` and `/privacy` are public **owner-review drafts** containing completion checklists, not final legal documents. Their links are deliberately labelled **Terms draft** and **Privacy draft**. Supply reviewed documents before collecting real pilot customer data. No testimonials or customer-result claims have been added. The dashboard shows recorded counts only. Requests marked done are explicitly owner-marked; the app does not detect Google reviews or display a conversion percentage.
 
 ## Demonstrate the actual app
 
@@ -277,6 +277,8 @@ Set `ADMIN_ORIGIN=https://your-admin.example` to the exact external origin, with
 **Built in Phase 1:** multiple editable business profiles with logo uploads; separate customer lists with notes and tags; per-business Twilio configuration; review-request SMS; one automatic three-day nudge; manual completion; phone-level opt-out handling; timestamped activity; a per-business dashboard; demo mode and automated tests.
 
 **Built in Phase 2:** business-scoped quotes with line items, tax, totals, expiry, and customer-facing notes; drafts and status filters; delivery by SMS and optional email with unsubscribe headers and a visible footer; customer opt-outs shared across sending channels; mobile-friendly customer links with Accept/Decline; activity and dashboard integration; two cancellable reminders after two and five days through each channel that successfully sent the original quote; simulated sends and automated tests.
+
+**Agreed future roadmap, outside this audit:** jobs and scheduling; invoices and payment tracking; missed-call text-back; equipment and maintenance tracking. These modules have not been implemented.
 
 **Planned for Phase 3:** missed-call text-back. It is not built or shown as a working control. There are no per-business logins, payments, billing, mobile app, Google review detection, or delivery-receipt processing in these phases.
 

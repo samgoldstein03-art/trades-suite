@@ -120,33 +120,20 @@ function responsiveTable(html, labels) {
     return `<tr>${content.replace(/<td(\s[^>]*)?>/g, (_, attrs = "") => `<td${attrs} data-label="${escape(labels[column++] || "")}">`)}</tr>`;
   });
 }
-function dashboardMetrics(requests, quotes, now = new Date()) {
-  const day = 86400000, current = new Date(now).getTime(), previous = current - 7 * day;
-  const timestamp = (value) => value ? Date.parse(value) : NaN;
-  const inWeek = (value, end) => timestamp(value) > end - 7 * day && timestamp(value) <= end;
-  const sentAt = (q) => timestamp(q.sent_at);
-  const delivered = quotes.filter((q) => q.status !== "draft" && Number.isFinite(sentAt(q)));
-  const openAt = (q, time) => sentAt(q) <= time &&
-    (!q.responded_at || timestamp(q.responded_at) > time) &&
-    (!q.expiry_date || timestamp(`${q.expiry_date}T23:59:59.999Z`) >= time) &&
-    (!["accepted", "declined"].includes(q.status) || Boolean(q.responded_at));
-  const reminderDates = requests.filter((r) => r.nudged_at).map((r) => r.nudged_at).concat(quotes.flatMap((q) => (q.deliveries || []).filter((d) => ["nudge_2", "nudge_5"].includes(d.kind) && ["sent", "simulated"].includes(d.status)).map((d) => d.updated_at || d.created_at)));
-  const weekDelta = (dates) => dates.filter((d) => inWeek(d, current)).length - dates.filter((d) => inWeek(d, previous)).length;
-  const percent = (accepted, total) => total ? Math.round(accepted / total * 1000) / 10 : 0;
-  const priorDelivered = delivered.filter((q) => sentAt(q) <= previous);
-  const conversion = percent(delivered.filter((q) => q.status === "accepted").length, delivered.length);
-  const priorConversion = percent(priorDelivered.filter((q) => q.status === "accepted" && timestamp(q.responded_at) <= previous).length, priorDelivered.length);
-  const awaiting = quotes.filter((q) => ["sent", "viewed"].includes(q.status)).length;
+function dashboardMetrics(requests, quotes) {
+  const reviewNudges = requests.filter((request) => request.nudged_at).length;
+  const quoteNudges = quotes.reduce((count, quote) => count + (quote.deliveries || []).filter((delivery) =>
+    ["nudge_2", "nudge_5"].includes(delivery.kind) && ["sent", "simulated"].includes(delivery.status),
+  ).length, 0);
   return {
-    reviews: { value: requests.length, delta: weekDelta(requests.map((r) => r.sent_at)), label: "vs previous 7 days" },
-    awaiting: { value: awaiting, delta: awaiting - delivered.filter((q) => openAt(q, previous)).length, label: "vs 7 days ago" },
-    nudges: { value: reminderDates.length, delta: weekDelta(reminderDates), label: "vs previous 7 days" },
-    conversion: { value: conversion, delta: Math.round((conversion - priorConversion) * 10) / 10, label: "pts vs 7 days ago" },
+    reviews: { value: requests.length, label: "Includes requests marked done" },
+    awaiting: { value: quotes.filter((quote) => ["sent", "viewed"].includes(quote.status)).length, label: "Sent or viewed quotes" },
+    nudges: { value: reviewNudges + quoteNudges, label: "Review and quote reminders" },
+    done: { value: requests.filter((request) => request.status === "done").length, label: "Marked manually by you" },
   };
 }
-function kpiCard(label, metric, suffix = "") {
-  const delta = metric.delta;
-  return `<article class="kpi-card"><div class="kpi-label">${label}</div><div class="kpi-value">${metric.value.toLocaleString()}${suffix}</div><div class="kpi-meta"><span class="kpi-delta neutral">${delta > 0 ? "+" : delta < 0 ? "−" : ""}${Math.abs(delta).toLocaleString()}</span><span>${metric.label}</span></div></article>`;
+function kpiCard(label, metric) {
+  return `<article class="kpi-card"><div class="kpi-label">${escape(label)}</div><div class="kpi-value">${metric.value.toLocaleString()}</div><div class="kpi-meta">${escape(metric.label)}</div></article>`;
 }
 function customerInfo(contact) {
   return `<div class="customer-info"><span class="avatar">${initials(contact.name || contact.contact_name)}</span><span><strong>${escape(contact.name || contact.contact_name)}</strong><small>${escape(contact.phone || contact.contact_phone || "")}</small></span></div>`;
@@ -274,9 +261,8 @@ function dashboardPage() {
   const recent = d.recent_activity || state.activity;
   const metrics = dashboardMetrics(state.requests, state.quotes || []);
   const today = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-  const greeting = new Date().getHours() < 12 ? "Good morning" : new Date().getHours() < 18 ? "Good afternoon" : "Good evening";
   const primary = (state.quotes || []).length ? '<button class="button" data-action="add-quote">' + icon("plus") + 'Create quote</button>' : state.contacts.length ? requestButton() : '<button class="button" data-action="add-contact">' + icon("plus") + 'Add your first customer</button>';
-  return `${mobileSwitcher()}<div class="page-heading dashboard-heading"><div><p class="date-label">${escape(today)}</p><h1>${greeting}.</h1><p>Here’s what’s happening at ${escape(state.business.name)}.</p></div>${primary}</div><section class="kpi-grid" aria-label="Your business at a glance">${kpiCard("Reviews requested", metrics.reviews)}${kpiCard("Quotes awaiting response", metrics.awaiting)}${kpiCard("Nudges sent", metrics.nudges)}${kpiCard("Quote conversion", metrics.conversion, "%")}</section>${attentionNeeded(d.attention_needed || [])}<div class="dashboard-content"><div>${quotesAwaitingResponse()}<section class="panel"><div class="panel-heading"><div><h2>Review follow-ups</h2><p>One friendly reminder, after 3 days.</p></div><a href="#requests" class="text-button">All requests </a></div><div class="nudge-list">${upcoming.length ? upcoming.slice(0, 3).map((r) => `<div class="nudge-row"><span class="avatar small">${initials(r.contact_name)}</span><span><strong>${escape(r.contact_name)}</strong><small>Review requested ${date(r.sent_at)}</small></span><span class="nudge-time">${new Date(r.nudge_due_at) <= new Date() ? "Due now" : date(r.nudge_due_at)}</span></div>`).join("") : empty("You’re all caught up", "Review follow-ups will appear here when they’re scheduled.")}</div></section></div><section class="panel"><div class="panel-heading"><div><h2>Recent activity</h2><p>The latest from your business.</p></div><a href="#activity" class="text-button" aria-label="View all activity">View all</a></div><div class="activity-list">${recent.length ? activityRows(recent.slice(0, 6)) : empty("A fresh start", "Messages and customer updates will appear here.")}</div></section></div>${workerStatus()}<h2 class="section-heading">Recent review requests</h2><section class="panel table-panel">${requestTable(state.requests.slice(0, 4), true)}</section>${demoBanner()}`;
+  return `${mobileSwitcher()}<div class="page-heading dashboard-heading"><div><p class="date-label">${escape(today)}</p><h1>A little word of mouth.</h1><p>Here’s what’s happening at ${escape(state.business.name)}.</p></div>${primary}</div><section class="kpi-grid" aria-label="Your business at a glance">${kpiCard("Review requests sent", metrics.reviews)}${kpiCard("Quotes awaiting response", metrics.awaiting)}${kpiCard("Follow-up messages sent", metrics.nudges)}${kpiCard("Requests marked done", metrics.done)}</section>${attentionNeeded(d.attention_needed || [])}<div class="dashboard-content"><div>${quotesAwaitingResponse()}<section class="panel"><div class="panel-heading"><div><h2>Review follow-ups</h2><p>Just one reminder. Never a string of texts.</p></div><a href="#requests" class="text-button">All requests </a></div><div class="nudge-list">${upcoming.length ? upcoming.slice(0, 3).map((r) => `<div class="nudge-row"><span class="avatar small">${initials(r.contact_name)}</span><span><strong>${escape(r.contact_name)}</strong><small>Review requested ${date(r.sent_at)}</small></span><span class="nudge-time">${new Date(r.nudge_due_at) <= new Date() ? "Due now" : date(r.nudge_due_at)}</span></div>`).join("") : empty("You’re all caught up", "Review follow-ups will appear here when they’re scheduled.")}</div></section></div><section class="panel"><div class="panel-heading"><div><h2>Recent activity</h2><p>The latest from your business.</p></div><a href="#activity" class="text-button" aria-label="View all activity">View all</a></div><div class="activity-list">${recent.length ? activityRows(recent.slice(0, 6)) : empty("A fresh start", "Messages and customer updates will appear here.")}</div></section></div>${workerStatus()}<h2 class="section-heading">Recent review requests</h2><section class="panel table-panel">${requestTable(state.requests.slice(0, 4), true)}</section>${demoBanner()}`;
 }
 function demoBanner() {
   return isDemo()

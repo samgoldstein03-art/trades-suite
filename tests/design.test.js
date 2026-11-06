@@ -4,23 +4,23 @@ import { readFileSync } from "node:fs";
 import { createContext, Script } from "node:vm";
 
 const frontend = readFileSync(new URL("../public/app.js", import.meta.url), "utf8").split('document.addEventListener("click"')[0];
-const now = "2026-10-16T12:00:00.000Z";
 function run(expression, values = {}) {
   const context = createContext(values);
   new Script(frontend).runInContext(context);
   return JSON.parse(new Script(`JSON.stringify(${expression})`).runInContext(context));
 }
 function metrics(requests = [], quotes = []) {
-  return run("dashboardMetrics(requests, quotes, now)", { requests, quotes, now });
+  return run("dashboardMetrics(requests, quotes)", { requests, quotes });
 }
 
-test("empty dashboard metrics have honest zero counts and zero deltas", () => {
+test("empty dashboard metrics show recorded counts without rates or trend claims", () => {
   const result = metrics();
-  assert.deepEqual(Object.keys(result), ["reviews", "awaiting", "nudges", "conversion"]);
+  assert.deepEqual(Object.keys(result), ["reviews", "awaiting", "nudges", "done"]);
   for (const metric of Object.values(result)) {
     assert.equal(metric.value, 0);
-    assert.equal(metric.delta, 0);
-    assert.ok(metric.label, "the comparison period is visible rather than an unexplained trend");
+    assert.equal(Object.hasOwn(metric, "delta"), false);
+    assert.ok(metric.label);
+    assert.doesNotMatch(metric.label, /%|previous|ago|conversion|review received/i);
   }
 });
 
@@ -31,67 +31,59 @@ test("review nudge totals retain reminders after the owner marks a request done"
     { status: "sent", sent_at: "2026-10-10T12:00:00Z", nudge_attempted_at: "2026-10-13T12:00:00Z", nudge_error: "Rejected" },
   ]);
   assert.equal(result.reviews.value, 3);
-  assert.equal(result.nudges.value, 2, "failed attempts are not counted as sent nudges");
-  assert.equal(result.nudges.delta, 0, "one successful reminder in each comparison period");
+  assert.equal(result.nudges.value, 2, "failed attempts are not counted as sent reminders");
+  assert.equal(result.done.value, 1, "manual completion stays separate from reminder sending");
 });
 
 test("quote nudge totals count successful channel messages and exclude failed or skipped attempts", () => {
-  const date = "2026-10-14T12:00:00Z";
-  const result = metrics([], [{ status: "sent", sent_at: "2026-10-12T12:00:00Z", deliveries: [
-    { channel: "sms", kind: "initial", status: "sent", updated_at: date },
-    { channel: "sms", kind: "nudge_2", status: "sent", updated_at: date },
-    { channel: "email", kind: "nudge_2", status: "simulated", created_at: date },
-    ...["failed", "uncertain", "sending", "skipped", "unknown"].map((status) => ({ channel: "email", kind: "nudge_5", status, updated_at: date })),
+  const result = metrics([], [{ status: "sent", deliveries: [
+    { channel: "sms", kind: "initial", status: "sent" },
+    { channel: "sms", kind: "nudge_2", status: "sent" },
+    { channel: "email", kind: "nudge_2", status: "simulated" },
+    ...["failed", "uncertain", "sending", "skipped", "unknown"].map((status) => ({ channel: "email", kind: "nudge_5", status })),
   ] }]);
-  assert.equal(result.nudges.value, 2, "two channels in one reminder round are two messages");
-  assert.equal(result.nudges.delta, 2);
+  assert.equal(result.nudges.value, 2, "two channels in one reminder round are two recorded messages");
 });
 
-test("trend windows are trailing seven days, with no overlap at the boundary or future events", () => {
-  const dates = [
-    "2026-10-16T12:00:00Z", // Included in the current period.
-    "2026-10-09T12:00:00.001Z", // Just inside the current period.
-    "2026-10-09T12:00:00Z", // Included only in the prior period.
-    "2026-10-02T12:00:00Z", // Outside both periods.
-    "2026-10-17T12:00:00Z", // Future timestamps do not invent an upward trend.
-    "invalid",
-  ];
-  const result = metrics(dates.map((sent_at) => ({ sent_at })));
-  assert.equal(result.reviews.delta, 1);
-  assert.equal(result.reviews.label, "vs previous 7 days");
-
-  const nudges = metrics([], [{ deliveries: [{ kind: "nudge_2", status: "sent", created_at: "2026-10-05T12:00:00Z", updated_at: "2026-10-14T12:00:00Z" }] }]);
-  assert.equal(nudges.nudges.delta, 1, "a message is dated by its successful update rather than its earlier claim");
+test("record timestamps do not create historical trends or inferred performance", () => {
+  const result = metrics([
+    { status: "sent", sent_at: "2026-10-16T12:00:00Z" },
+    { status: "sent", sent_at: "2026-10-09T12:00:00Z" },
+    { status: "done", sent_at: "2026-10-17T12:00:00Z", done_at: "invalid" },
+  ]);
+  assert.equal(result.reviews.value, 3);
+  assert.equal(result.done.value, 1, "the saved status is counted without inferring a review from its date");
+  assert.ok(Object.values(result).every((metric) => !Object.hasOwn(metric, "delta")));
+  assert.equal(Object.hasOwn(result, "conversion"), false);
 });
 
-test("awaiting-response deltas reconstruct prior open quotes across acceptance, decline and expiry", () => {
-  const expiry_date = "2026-12-31";
+test("quotes awaiting a response count current sent and viewed records only", () => {
   const result = metrics([], [
-    { status: "sent", sent_at: "2026-09-30T12:00:00Z", expiry_date },
-    { status: "accepted", sent_at: "2026-10-01T12:00:00Z", responded_at: "2026-10-12T12:00:00Z", expiry_date },
-    { status: "declined", sent_at: "2026-10-01T12:00:00Z", responded_at: "2026-10-13T12:00:00Z", expiry_date },
-    { status: "expired", sent_at: "2026-10-03T12:00:00Z", expiry_date: "2026-10-11" },
-    { status: "viewed", sent_at: "2026-10-12T12:00:00Z", expiry_date },
-    { status: "draft", expiry_date },
+    { status: "sent" }, { status: "viewed" }, { status: "draft" },
+    { status: "accepted" }, { status: "declined" }, { status: "expired" },
   ]);
   assert.equal(result.awaiting.value, 2);
-  assert.equal(result.awaiting.delta, -2, "four were open seven days ago and two remain open now");
-  assert.equal(result.awaiting.label, "vs 7 days ago");
-
-  assert.equal(metrics([], [{ status: "accepted", sent_at: "2026-09-30T12:00:00Z", expiry_date }]).awaiting.delta, 0, "a missing response time must not invent a prior open state");
+  assert.equal(result.awaiting.label, "Sent or viewed quotes");
+  assert.equal(Object.hasOwn(result.awaiting, "delta"), false, "no prior backlog is reconstructed");
 });
 
-test("quote conversion uses delivered quotes and reports a percentage-point change", () => {
-  const result = metrics([], [
-    { status: "accepted", sent_at: "2026-09-01T12:00:00Z", responded_at: "2026-10-01T12:00:00Z" },
-    { status: "accepted", sent_at: "2026-10-05T12:00:00Z", responded_at: "2026-10-14T12:00:00Z" },
-    { status: "declined", sent_at: "2026-10-02T12:00:00Z", responded_at: "2026-10-03T12:00:00Z" },
-    { status: "sent", sent_at: "2026-10-12T12:00:00Z" },
-    { status: "draft" },
-  ]);
-  assert.equal(result.conversion.value, 50);
-  assert.equal(result.conversion.delta, 16.7, "50% now minus 33.3% seven days ago");
-  assert.equal(result.conversion.label, "pts vs 7 days ago");
+test("the dashboard labels manual completion honestly and has no review or conversion percentage", () => {
+  const html = run(`(() => {
+    state.business = { id: "b1", name: "Sample Plumbing" };
+    state.businesses = [state.business];
+    state.requests = [{ id: "r1", status: "done", contact_name: "Sample customer", sent_at: "2026-10-10T12:00:00Z" }];
+    state.quotes = [{ id: "q1", status: "accepted", total_cents: 10000 }];
+    state.activity = [];
+    state.contacts = [];
+    return dashboardPage();
+  })()`);
+  assert.match(html, /Requests marked done/);
+  assert.match(html, /Marked manually by you/);
+  assert.match(html, /A little word of mouth/);
+  assert.match(html, /Just one reminder\. Never a string of texts/);
+  assert.doesNotMatch(html, /conversion|review received|reviews received|%|vs previous|vs 7 days/i);
+  assert.equal((html.match(/class="kpi-card"/g) || []).length, 4, "the existing four-card layout is preserved");
+  assert.match(html, /data-action="add-quote"/, "the primary quote action remains available");
 });
 
 test("responsive rows keep actions and amount alignment while escaping their mobile labels", () => {
