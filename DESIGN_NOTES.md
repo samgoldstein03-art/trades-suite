@@ -39,3 +39,15 @@ No card claims that Google reviews were received. The app does not detect them. 
 ## Verification
 
 The full automated suite and current browser checks are recorded in PILOT_AUDIT.md. Tests intentionally replace the removed conversion/trend expectations with direct-record count checks; sending, business isolation, reminders and opt-out regressions remain in the suite. An added public-font regression requests the restored font CSS and checks all nine referenced files without exposing admin data.
+
+## Jobs and scheduling addition
+
+- **Jobs & schedule:** existing card, row, filter, status pill, modal and empty-state patterns. Search and status/type filters, customer-specific shortcuts and reset, list plus weekly agenda, and an explicit unscheduled queue. No invented percentage or dispatch map.
+- **Job editor/detail:** customer and optional accepted quote reuse existing records. Work, address, local date/arrival window and time zone are distinct from internal notes and published customer updates. Delivered quote terms are unchanged.
+- **Dashboard:** recorded upcoming visits and jobs needing booking join the existing queues without new performance metrics.
+- **Customer job page:** same self-hosted fonts and brand tokens, business identity, address, arrival window, actual status and published history, optional accepted quote, business contact links and draft legal links. It is read-only, with an explicit sample-data label for demo jobs. Loading/unavailable/retry states preserve privacy and clear revoked content.
+- **Sharing:** explicit enable/copy/replace/disable controls explain that anyone with the link can read that one job. No automatic SMS or email is introduced.
+
+This addition does not change the original brand exceptions (16px panels and restrained lime), existing messaging behavior, quote terms or legal draft status.
+
+Verification for this addition: 197 tests pass, including all new jobs, customer-page and sample-preview tests and the existing non-TCP suites. The complete suite was attempted; 32 existing local-server tests were blocked by Windows sandbox connect EACCES before reaching the app. A full green run and the interactive browser walkthrough still need the normal terminal. The browser preview was rebuilt, but no new visual walkthrough is claimed from this restricted session.

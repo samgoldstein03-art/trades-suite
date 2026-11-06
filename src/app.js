@@ -9,6 +9,7 @@ import { openDatabase, transaction } from "./db.js";
 import { createAdminAccess } from "./admin.js";
 import { configureProxyTrust, createApiRateLimit } from "./rate-limits.js";
 import { createQuoteModule, QuoteError } from "./quotes.js";
+import { createJobModule, JobError } from "./jobs.js";
 import { emailTransport, emailReady } from "./email.js";
 import {
   buildSms,
@@ -101,13 +102,15 @@ export function createApp({
   configureProxyTrust(app);
   const uploadPath = resolve(uploadDir);
   mkdirSync(uploadPath, { recursive: true });
+  const publicOrigin = (req) => quotePublicOrigin || admin.adminOrigin ||
+    (smsMode === "demo" && /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(req.get("host") || "")
+      ? `${req.protocol}://${req.get("host")}` : "");
   const quotes = createQuoteModule({
     db, smsMode, now, sendSms, sendEmail, uploadDir: uploadPath,
     emailReady: sendEmail === emailTransport ? emailReady : () => true,
-    publicOrigin: (req) => quotePublicOrigin || admin.adminOrigin ||
-      (smsMode === "demo" && /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(req.get("host") || "")
-        ? `${req.protocol}://${req.get("host")}` : ""),
+    publicOrigin,
   });
+  const jobs = createJobModule({ db, smsMode, now, publicOrigin, uploadDir: uploadPath });
   const stamp = () => new Date(now()).toISOString();
   let workerLastCheckedAt = null;
   const getBusiness = (id) => {
@@ -389,6 +392,7 @@ export function createApp({
     res.set("Cache-Control", "no-store").json({ status: "ok" });
   });
   app.use("/q", createApiRateLimit(), express.json({ limit: "8kb" }), quotes.publicRouter);
+  app.use("/j", createApiRateLimit(), jobs.publicRouter);
   app.get("/terms", (req, res) => {
     res.set("Cache-Control", "no-store").sendFile(resolve(ROOT, "public/terms.html"));
   });
@@ -445,6 +449,7 @@ export function createApp({
   });
 
   app.use("/api/businesses/:businessId/quotes", quotes.adminRouter);
+  app.use("/api/businesses/:businessId/jobs", jobs.adminRouter);
 
   app.get("/api/config", (req, res) =>
     res.json({ sms_mode: smsMode, nudge_after_hours: 72 }),
@@ -1166,11 +1171,11 @@ export function createApp({
               ? "Choose a logo smaller than 2 MB."
               : "Upload one logo image at a time.",
         });
-    if (error instanceof AppError || error instanceof QuoteError) {
+    if (error instanceof AppError || error instanceof QuoteError || error instanceof JobError) {
       // Browser document requests get the same error in the customer visual
       // language. Data requests and clients accepting */* keep their JSON API.
       const customerDocument = ["GET", "HEAD"].includes(req.method)
-        && /^\/q\/(?:unsubscribe\/)?[^/]+\/?$/.test(req.path)
+        && /^(?:\/q\/(?:unsubscribe\/)?[^/]+|\/j\/[^/]+)\/?$/.test(req.path)
         && /(?:^|,)\s*text\/html\s*(?:;|,|$)/i.test(req.get("Accept") || "")
         && req.accepts("html");
       if (customerDocument) {

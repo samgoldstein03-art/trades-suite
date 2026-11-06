@@ -21,6 +21,7 @@ const nav = [
   ["contacts", "Customers"],
   ["requests", "Review requests"],
   ["quotes", "Quotes"],
+  ["jobs", "Jobs & schedule"],
   ["activity", "Activity"],
   ["settings", "Business settings"],
 ];
@@ -31,6 +32,7 @@ let state = {
   contacts: [],
   requests: [],
   quotes: [],
+  jobs: [],
   activity: [],
   dashboard: {},
   page: "dashboard",
@@ -158,24 +160,30 @@ async function refresh() {
     null;
   if (state.business) {
     localStorage.setItem("tradesuite-business", state.business.id);
-    const [contacts, requests, activity, dashboard, quotes] = await Promise.all([
+    const [contacts, requests, activity, dashboard, quotes, jobs] = await Promise.all([
       api(`${base()}/contacts`),
       api(`${base()}/requests`),
       api(`${base()}/activity`),
       api(`${base()}/dashboard`),
       api(`${base()}/quotes`),
+      api(`${base()}/jobs`),
     ]);
     if (run !== generation) return;
-    Object.assign(state, { contacts, requests, activity, dashboard, quotes });
+    Object.assign(state, { contacts, requests, activity, dashboard, quotes, jobs });
   }
   render();
 }
 function render() {
   state.page = location.hash.slice(1) || "dashboard";
   const customerRoute = state.config.browser_demo && /^quote\/([A-Za-z0-9_-]+)$/.exec(state.page);
+  const customerJobRoute = state.config.browser_demo && /^job\/([A-Za-z0-9_-]+)$/.exec(state.page);
   const unsubscribeRoute = state.config.browser_demo && /^unsubscribe\/([A-Za-z0-9_-]+)$/.exec(state.page);
   const legalRoute = state.config.browser_demo && ["terms", "privacy"].includes(state.page);
-  document.body.classList.toggle("customer-quote-view", Boolean(customerRoute || unsubscribeRoute || legalRoute));
+  document.body.classList.toggle("customer-quote-view", Boolean(customerRoute || customerJobRoute || unsubscribeRoute || legalRoute));
+  if (customerJobRoute) {
+    renderBrowserCustomerJob(customerJobRoute[1]);
+    return;
+  }
   if (legalRoute) {
     renderBrowserLegal(state.page);
     return;
@@ -223,12 +231,14 @@ function render() {
     contacts: contactsPage,
     requests: requestsPage,
     quotes: quotesPage,
+    jobs: jobsPage,
     activity: activityPage,
     settings: settingsPage,
   }[state.page]();
   if (state.page === "settings") bindSettings();
   if (state.page === "contacts" || state.page === "requests") bindFilters();
   if (state.page === "quotes") bindQuoteFilters();
+  if (state.page === "jobs") bindJobFilters();
 }
 function activityRows(items, full = false) {
   return items
@@ -262,7 +272,7 @@ function dashboardPage() {
   const metrics = dashboardMetrics(state.requests, state.quotes || []);
   const today = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   const primary = (state.quotes || []).length ? '<button class="button" data-action="add-quote">' + icon("plus") + 'Create quote</button>' : state.contacts.length ? requestButton() : '<button class="button" data-action="add-contact">' + icon("plus") + 'Add your first customer</button>';
-  return `${mobileSwitcher()}<div class="page-heading dashboard-heading"><div><p class="date-label">${escape(today)}</p><h1>A little word of mouth.</h1><p>Here’s what’s happening at ${escape(state.business.name)}.</p></div>${primary}</div><section class="kpi-grid" aria-label="Your business at a glance">${kpiCard("Review requests sent", metrics.reviews)}${kpiCard("Quotes awaiting response", metrics.awaiting)}${kpiCard("Follow-up messages sent", metrics.nudges)}${kpiCard("Requests marked done", metrics.done)}</section>${attentionNeeded(d.attention_needed || [])}<div class="dashboard-content"><div>${quotesAwaitingResponse()}<section class="panel"><div class="panel-heading"><div><h2>Review follow-ups</h2><p>Just one reminder. Never a string of texts.</p></div><a href="#requests" class="text-button">All requests </a></div><div class="nudge-list">${upcoming.length ? upcoming.slice(0, 3).map((r) => `<div class="nudge-row"><span class="avatar small">${initials(r.contact_name)}</span><span><strong>${escape(r.contact_name)}</strong><small>Review requested ${date(r.sent_at)}</small></span><span class="nudge-time">${new Date(r.nudge_due_at) <= new Date() ? "Due now" : date(r.nudge_due_at)}</span></div>`).join("") : empty("You’re all caught up", "Review follow-ups will appear here when they’re scheduled.")}</div></section></div><section class="panel"><div class="panel-heading"><div><h2>Recent activity</h2><p>The latest from your business.</p></div><a href="#activity" class="text-button" aria-label="View all activity">View all</a></div><div class="activity-list">${recent.length ? activityRows(recent.slice(0, 6)) : empty("A fresh start", "Messages and customer updates will appear here.")}</div></section></div>${workerStatus()}<h2 class="section-heading">Recent review requests</h2><section class="panel table-panel">${requestTable(state.requests.slice(0, 4), true)}</section>${demoBanner()}`;
+  return `${mobileSwitcher()}<div class="page-heading dashboard-heading"><div><p class="date-label">${escape(today)}</p><h1>A little word of mouth.</h1><p>Here’s what’s happening at ${escape(state.business.name)}.</p></div>${primary}</div><section class="kpi-grid" aria-label="Your business at a glance">${kpiCard("Review requests sent", metrics.reviews)}${kpiCard("Quotes awaiting response", metrics.awaiting)}${kpiCard("Follow-up messages sent", metrics.nudges)}${kpiCard("Requests marked done", metrics.done)}</section>${attentionNeeded(d.attention_needed || [])}<div class="dashboard-content"><div>${quotesAwaitingResponse()}<section class="panel"><div class="panel-heading"><div><h2>Review follow-ups</h2><p>Just one reminder. Never a string of texts.</p></div><a href="#requests" class="text-button">All requests </a></div><div class="nudge-list">${upcoming.length ? upcoming.slice(0, 3).map((r) => `<div class="nudge-row"><span class="avatar small">${initials(r.contact_name)}</span><span><strong>${escape(r.contact_name)}</strong><small>Review requested ${date(r.sent_at)}</small></span><span class="nudge-time">${new Date(r.nudge_due_at) <= new Date() ? "Due now" : date(r.nudge_due_at)}</span></div>`).join("") : empty("You’re all caught up", "Review follow-ups will appear here when they’re scheduled.")}</div></section></div><section class="panel"><div class="panel-heading"><div><h2>Recent activity</h2><p>The latest from your business.</p></div><a href="#activity" class="text-button" aria-label="View all activity">View all</a></div><div class="activity-list">${recent.length ? activityRows(recent.slice(0, 6)) : empty("A fresh start", "Messages and customer updates will appear here.")}</div></section></div>${workerStatus()}${dashboardJobs()}<h2 class="section-heading">Recent review requests</h2><section class="panel table-panel">${requestTable(state.requests.slice(0, 4), true)}</section>${demoBanner()}`;
 }
 function demoBanner() {
   return isDemo()
@@ -275,7 +285,7 @@ function contactsPage() {
 function contactsTable(contacts) {
   if (!contacts.length && state.contacts.length) return empty("No matching customers", "Try another name or relationship.");
   return contacts.length
-    ? responsiveTable(`<table><thead><tr><th>Name & phone</th><th>Email</th><th>Relationship</th><th>Message permission</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${contacts.map((c) => `<tr><td>${customerInfo(c)}</td><td>${escape(c.email || "No email")}</td><td>${(Array.isArray(c.tags) ? c.tags : [c.tags]).filter(Boolean).map(badge).join(" ")}</td><td>${c.opted_out ? badge("opted-out") : c.sms_consent ? '<span class="success-text">Text permission recorded</span>' : '<span class="subtle">No text permission yet</span>'}</td><td><button class="text-button table-action" data-action="edit-contact" data-id="${escape(c.id)}">Edit </button></td></tr>`).join("")}</tbody></table>`, ["Customer","Email","Relationship","Message permission","Actions"])
+    ? responsiveTable(`<table><thead><tr><th>Name & phone</th><th>Email</th><th>Relationship</th><th>Message permission</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${contacts.map((c) => `<tr><td>${customerInfo(c)}</td><td>${escape(c.email || "No email")}</td><td>${(Array.isArray(c.tags) ? c.tags : [c.tags]).filter(Boolean).map(badge).join(" ")}</td><td>${c.opted_out ? badge("opted-out") : c.sms_consent ? '<span class="success-text">Text permission recorded</span>' : '<span class="subtle">No text permission yet</span>'}</td><td><button class="text-button table-action" data-action="edit-contact" data-id="${escape(c.id)}">Edit </button><button class="text-button table-action" data-action="customer-jobs" data-id="${escape(c.id)}">View jobs</button></td></tr>`).join("")}</tbody></table>`, ["Customer","Email","Relationship","Message permission","Actions"])
     : empty(
         "No customers here yet",
         "Add a customer to start building your list.",
@@ -648,9 +658,11 @@ async function quoteDetail(id) {
   try { q = await api(`${context}/quotes/${encodeURIComponent(id)}`); }
   catch (error) { if (loading !== modalGeneration) return; openModal("Couldn’t open this quote", "Try again in a moment.", empty("Quote unavailable", escape(error.message), '<button class="button secondary" data-action="close">Close</button>')); throw error; }
   if (loading !== modalGeneration || context !== base()) return;
+  const cachedQuotes = state.quotes || [];
+  state.quotes = cachedQuotes.some((item) => String(item.id) === String(q.id)) ? cachedQuotes.map((item) => String(item.id) === String(q.id) ? q : item) : [q, ...cachedQuotes];
   const customerLink = safeQuoteUrl(q.public_url);
   const unanswered = ["sent", "viewed"].includes(q.status);
-  openModal(escape(q.reference || "Your quote"), escape(q.contact_name), `<div class="quote-detail"><div class="quote-detail-meta">${badge(q.status)}<span>Valid through ${escape(quoteDate(q.expiry_date))}</span></div><div class="quote-detail-items">${q.line_items.map((item) => `<div><span><strong>${escape(item.description)}</strong><small>${escape(item.quantity)} × ${escape(money(Math.round(item.unit_price * 100), q.currency))}</small></span><strong>${escape(money(item.line_total_cents, q.currency))}</strong></div>`).join("")}</div>${quoteTotalsMarkup(q)}${q.notes ? `<div class="quote-note"><strong>Note to your customer</strong><p>${escape(q.notes)}</p></div>` : ""}${q.status !== "draft" && customerLink ? `<div class="quote-link-box"><strong>Customer link</strong><a href="${escape(customerLink)}" target="_blank" rel="noopener">Open the customer’s quote </a><div class="copy-link-row"><input aria-label="Customer quote link" value="${escape(customerLink)}" readonly><button type="button" class="button secondary" data-action="copy-quote-link" data-url="${escape(customerLink)}">Copy link</button></div><p class="note">Anyone with this link can view and respond. Opening it records a view.</p></div>` : ""}${(q.deliveries || []).some(quoteDeliveryNeedsAttention) ? `<div class="error-box">${(q.deliveries || []).filter(quoteDeliveryNeedsAttention).map((d) => `${escape(d.channel === "email" ? "Email" : "Text")}: ${escape(d.error || "Sending could not be confirmed. Check the activity log.")}`).join("<br>")}</div>` : ""}${quoteDeliveryTimeline(q.deliveries || [])}<div class="quote-reminders"><strong>${escape(quoteFollowUpText(q))}</strong>${quoteFollowUpChannels(q) ? `<p class="note">${escape(quoteFollowUpChannels(q))}</p>` : ""}${unanswered && !q.follow_ups_cancelled_at && quoteFollowUpsPending(q) ? `<button class="text-button" data-action="cancel-quote-followups" data-id="${escape(q.id)}">Stop reminders</button>` : ""}</div>${unanswered && isDemo() ? `<div class="quote-demo-tools"><strong>Try the automatic reminders</strong><p class="note">Move this business’s demo quotes forward. No real texts or emails are sent.</p><div><button class="button secondary small-button" data-action="quote-demo-advance" data-days="2" data-id="${escape(q.id)}">Move forward 2 days</button><button class="button secondary small-button" data-action="quote-demo-advance" data-days="3" data-id="${escape(q.id)}">Then 3 more days</button></div></div>` : ""}<div class="form-actions"><button class="button secondary" data-action="close">Close</button>${q.status === "draft" && !(q.deliveries || []).length ? `<button class="button secondary" data-action="edit-quote" data-id="${escape(q.id)}">Edit draft</button>` : ""}${["draft", "sent", "viewed"].includes(q.status) && (q.sendable_channels || ["sms", "email"]).length ? `<button class="button" data-action="send-quote" data-id="${escape(q.id)}">${q.status === "draft" ? "Send quote" : "Send link"} </button>` : ""}</div></div>`, true);
+  openModal(escape(q.reference || "Your quote"), escape(q.contact_name), `<div class="quote-detail"><div class="quote-detail-meta">${badge(q.status)}<span>Valid through ${escape(quoteDate(q.expiry_date))}</span></div><div class="quote-detail-items">${q.line_items.map((item) => `<div><span><strong>${escape(item.description)}</strong><small>${escape(item.quantity)} × ${escape(money(Math.round(item.unit_price * 100), q.currency))}</small></span><strong>${escape(money(item.line_total_cents, q.currency))}</strong></div>`).join("")}</div>${quoteTotalsMarkup(q)}${q.notes ? `<div class="quote-note"><strong>Note to your customer</strong><p>${escape(q.notes)}</p></div>` : ""}${q.status !== "draft" && customerLink ? `<div class="quote-link-box"><strong>Customer link</strong><a href="${escape(customerLink)}" target="_blank" rel="noopener">Open the customer’s quote </a><div class="copy-link-row"><input aria-label="Customer quote link" value="${escape(customerLink)}" readonly><button type="button" class="button secondary" data-action="copy-quote-link" data-url="${escape(customerLink)}">Copy link</button></div><p class="note">Anyone with this link can view and respond. Opening it records a view.</p></div>` : ""}${(q.deliveries || []).some(quoteDeliveryNeedsAttention) ? `<div class="error-box">${(q.deliveries || []).filter(quoteDeliveryNeedsAttention).map((d) => `${escape(d.channel === "email" ? "Email" : "Text")}: ${escape(d.error || "Sending could not be confirmed. Check the activity log.")}`).join("<br>")}</div>` : ""}${quoteDeliveryTimeline(q.deliveries || [])}<div class="quote-reminders"><strong>${escape(quoteFollowUpText(q))}</strong>${quoteFollowUpChannels(q) ? `<p class="note">${escape(quoteFollowUpChannels(q))}</p>` : ""}${unanswered && !q.follow_ups_cancelled_at && quoteFollowUpsPending(q) ? `<button class="text-button" data-action="cancel-quote-followups" data-id="${escape(q.id)}">Stop reminders</button>` : ""}</div>${unanswered && isDemo() ? `<div class="quote-demo-tools"><strong>Try the automatic reminders</strong><p class="note">Move this business’s demo quotes forward. No real texts or emails are sent.</p><div><button class="button secondary small-button" data-action="quote-demo-advance" data-days="2" data-id="${escape(q.id)}">Move forward 2 days</button><button class="button secondary small-button" data-action="quote-demo-advance" data-days="3" data-id="${escape(q.id)}">Then 3 more days</button></div></div>` : ""}<div class="form-actions"><button class="button secondary" data-action="close">Close</button>${quoteJobAction(q)}${q.status === "draft" && !(q.deliveries || []).length ? `<button class="button secondary" data-action="edit-quote" data-id="${escape(q.id)}">Edit draft</button>` : ""}${["draft", "sent", "viewed"].includes(q.status) && (q.sendable_channels || ["sms", "email"]).length ? `<button class="button" data-action="send-quote" data-id="${escape(q.id)}">${q.status === "draft" ? "Send quote" : "Send link"} </button>` : ""}</div></div>`, true);
 }
 async function quoteSendModal(id) {
   const context = base();
@@ -829,6 +841,240 @@ function demoNudge() {
     "Demo follow-up checked. See the activity log for the results.",
   );
 }
+// Jobs keep appointment dates in the business's chosen time zone. These are
+// calendar dates and wall-clock times, not instants to convert to the viewer's zone.
+const jobStatuses = {
+  awaiting_scheduling: "Needs booking", scheduled: "Booked", waiting_parts: "Waiting for parts",
+  in_progress: "In progress", completed: "Completed", follow_up: "Follow-up needed", cancelled: "Cancelled",
+};
+function jobToday() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+function jobAddDays(value, days) {
+  const day = new Date(`${value}T12:00:00Z`);
+  day.setUTCDate(day.getUTCDate() + days);
+  return day.toISOString().slice(0, 10);
+}
+function jobDate(value) {
+  return value ? new Date(`${value}T12:00:00Z`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : "Not booked yet";
+}
+function jobTime(value) {
+  if (!/^\d{2}:\d{2}$/.test(value || "")) return "";
+  const [hour, minute] = value.split(":").map(Number);
+  return `${hour % 12 || 12}:${String(minute).padStart(2, "0")} ${hour < 12 ? "am" : "pm"}`;
+}
+function jobWindow(job) {
+  return job.arrival_start && job.arrival_end ? `${jobTime(job.arrival_start)} to ${jobTime(job.arrival_end)}` : "Arrival window not set";
+}
+function jobBadge(status) {
+  return `<span class="badge admin-job-status ${escape(status)}">${escape(jobStatuses[status] || status)}</span>`;
+}
+function defaultJobZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Toronto";
+}
+function newJobsUi() { return { view: "list", query: "", status: "all", type: "all", contact: "", day: jobToday(), span: "week" }; }
+let jobsUi = newJobsUi();
+function filteredJobs(jobs = state.jobs || [], filters = jobsUi) {
+  const query = (filters.query || "").trim().toLowerCase();
+  return jobs.filter((job) => (!filters.contact || String(job.contact_id) === String(filters.contact)) && (!query || `${job.title} ${job.reference || ""} ${job.contact_name} ${job.service_address}`.toLowerCase().includes(query)) && (filters.status === "all" || job.status === filters.status) && (filters.type === "all" || job.job_type === filters.type));
+}
+function jobsTable(jobs, compact = false) {
+  if (!jobs.length) return empty("No matching jobs", "Try another search or filter.");
+  return responsiveTable(`<table><thead><tr><th>Job & customer</th><th>Status</th><th>Visit</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${jobs.map((job) => `<tr><td><strong>${escape(job.title)}</strong><small class="quote-reference">${escape(job.contact_name)}${compact ? "" : ` · ${job.job_type === "installation" ? "Installation" : "Service"}`}</small>${compact ? "" : `<small class="quote-reference">${escape(job.service_address)}</small>`}</td><td>${jobBadge(job.status)}</td><td><span>${escape(jobDate(job.scheduled_date))}</span>${job.scheduled_date ? `<small class="quote-reference">${escape(jobWindow(job))}</small><small class="quote-reference">${escape(job.time_zone)}</small>` : ""}</td><td><button class="text-button table-action" data-action="view-job" data-id="${escape(job.id)}">View job</button></td></tr>`).join("")}</tbody></table>`, ["Job & customer", "Status", "Visit", "Actions"]);
+}
+function jobAgendaRange(filters = jobsUi) {
+  const selected = filters.day || jobToday();
+  if (filters.span === "day") return { start: selected, end: selected };
+  const day = new Date(`${selected}T12:00:00Z`).getUTCDay();
+  const start = jobAddDays(selected, -(day + 6) % 7);
+  return { start, end: jobAddDays(start, 6) };
+}
+function jobsAgenda(jobs) {
+  const { start, end } = jobAgendaRange();
+  const dated = jobs.filter((job) => job.scheduled_date && job.scheduled_date >= start && job.scheduled_date <= end && job.status !== "cancelled");
+  const days = [...new Set(dated.map((job) => job.scheduled_date))].sort();
+  const unbooked = jobs.filter((job) => !job.scheduled_date && !["completed", "cancelled"].includes(job.status));
+  return `<div class="jobs-range-label"><strong>${escape(jobDate(start))}${end !== start ? ` to ${escape(jobDate(end))}` : ""}</strong><p class="note">Arrival windows use each job’s saved time zone.</p></div>${days.length ? days.map((day) => `<section class="panel jobs-agenda-day"><div class="panel-heading"><h2>${escape(jobDate(day))}</h2></div><div class="table-panel">${jobsTable(dated.filter((job) => job.scheduled_date === day).sort((a, b) => (a.arrival_start || "").localeCompare(b.arrival_start || "")), true)}</div></section>`).join("") : `<section class="panel">${empty("No visits in this view", "Choose another date, or book a job below.")}</section>`}<section class="panel jobs-agenda-day"><div class="panel-heading"><div><h2>Needs a date</h2><p>Jobs without a booked visit, across all dates.</p></div></div><div class="table-panel">${unbooked.length ? jobsTable(unbooked, true) : empty("Everything has a date", "Unbooked jobs will appear here.")}</div></section>`;
+}
+function jobsResults() {
+  const jobs = filteredJobs();
+  if (!(state.jobs || []).length) return `<section class="panel">${empty("A place for the work ahead", "Create a job from an accepted quote, or add a service visit here.", '<button class="button secondary" data-action="add-job">Add a job</button>')}</section>`;
+  return jobsUi.view === "schedule" ? jobsAgenda(jobs) : `<section class="panel table-panel">${jobsTable(jobs)}</section>`;
+}
+function jobsPage() {
+  return `${heading("Jobs & schedule", "Book the visit. Keep the work and your customer up to date.", '<button class="button" data-action="add-job">' + icon("plus") + 'Add a job</button>')}<div class="jobs-view-bar"><div class="jobs-view-switch" aria-label="Job view"><button class="button ${jobsUi.view === "list" ? "" : "secondary"}" data-action="jobs-view" data-view="list" aria-pressed="${jobsUi.view === "list"}">Job list</button><button class="button ${jobsUi.view === "schedule" ? "" : "secondary"}" data-action="jobs-view" data-view="schedule" aria-pressed="${jobsUi.view === "schedule"}">Schedule</button></div><p class="note">Your schedule and updates are recorded here. No appointment messages are sent.</p></div><div class="toolbar jobs-toolbar"><div class="search-field">${icon("search")}<input id="jobs-search" value="${escape(jobsUi.query)}" placeholder="Find a job or customer…" aria-label="Find a job or customer"></div><select id="jobs-status" class="filter-select" aria-label="Filter job status"><option value="all">All statuses</option>${Object.entries(jobStatuses).map(([key, label]) => `<option value="${key}" ${jobsUi.status === key ? "selected" : ""}>${label}</option>`).join("")}</select><select id="jobs-type" class="filter-select" aria-label="Filter job type"><option value="all">Service & installation</option><option value="service" ${jobsUi.type === "service" ? "selected" : ""}>Service</option><option value="installation" ${jobsUi.type === "installation" ? "selected" : ""}>Installation</option></select></div>${jobsUi.view === "schedule" ? `<div class="jobs-date-controls"><label class="form-field" for="jobs-day">Show visits around<input id="jobs-day" type="date" value="${escape(jobsUi.day)}" required></label><label class="form-field" for="jobs-span">View<select id="jobs-span"><option value="day" ${jobsUi.span === "day" ? "selected" : ""}>Day</option><option value="week" ${jobsUi.span === "week" ? "selected" : ""}>Week</option></select></label><button class="button secondary" data-action="jobs-today">Today</button></div>` : ""}${jobsUi.contact ? `<div class="jobs-contact-filter"><span>Jobs for <strong>${escape(state.contacts.find((contact) => String(contact.id) === String(jobsUi.contact))?.name || "this customer")}</strong></span><button class="text-button" data-action="clear-job-customer">Show all customers</button></div>` : ""}<div id="jobs-results">${jobsResults()}</div>`;
+}
+function bindJobFilters() {
+  const update = () => {
+    jobsUi.query = $("#jobs-search").value;
+    jobsUi.status = $("#jobs-status").value;
+    jobsUi.type = $("#jobs-type").value;
+    if ($("#jobs-day")?.value) jobsUi.day = $("#jobs-day").value;
+    if ($("#jobs-span")) jobsUi.span = $("#jobs-span").value;
+    $("#jobs-results").innerHTML = jobsResults();
+  };
+  $("#jobs-search").addEventListener("input", update);
+  ["#jobs-status", "#jobs-type", "#jobs-day", "#jobs-span"].forEach((selector) => $(selector)?.addEventListener("change", update));
+}
+function dashboardJobs() {
+  const open = (state.jobs || []).filter((job) => !["completed", "cancelled"].includes(job.status));
+  const unbooked = open.filter((job) => !job.scheduled_date);
+  const upcoming = open.filter((job) => job.scheduled_date >= jobToday()).sort((a, b) => `${a.scheduled_date}${a.arrival_start}`.localeCompare(`${b.scheduled_date}${b.arrival_start}`));
+  return `<section class="panel jobs-dashboard"><div class="panel-heading"><div><h2>Your next jobs</h2><p>Booked visits and work that needs a date.</p></div><a href="#jobs" class="text-button">Jobs & schedule</a></div>${upcoming.length ? `<div class="table-panel">${jobsTable(upcoming.slice(0, 4), true)}</div>` : `<p class="admin-job-empty-line">No upcoming visits booked.</p>`}${unbooked.length ? `<div class="admin-job-booking"><h3>Needs booking</h3>${unbooked.slice(0, 4).map((job) => `<div class="admin-job-booking-row"><span><strong>${escape(job.title)}</strong><small>${escape(job.contact_name)}</small></span><button class="text-button" data-action="view-job" data-id="${escape(job.id)}">Book visit</button></div>`).join("")}</div>` : ""}${!open.length ? `<div class="admin-job-empty-line"><p>Accepted a quote? Turn it into a job to keep the next steps together.</p><a href="#jobs" class="text-button">Open jobs</a></div>` : ""}</section>`;
+}
+function quoteJobAction(quote) {
+  if (quote.status !== "accepted") return "";
+  const job = (state.jobs || []).find((item) => String(item.quote_id) === String(quote.id));
+  return job ? `<button class="button" data-action="view-job" data-id="${escape(job.id)}">View job</button>` : `<button class="button" data-action="quote-to-job" data-id="${escape(quote.id)}">Create job</button>`;
+}
+function jobQuoteOptions(contactId, selected = "") {
+  return '<option value="">No linked quote</option>' + (state.quotes || []).filter((quote) => quote.status === "accepted" && String(quote.contact_id) === String(contactId)).map((quote) => `<option value="${escape(quote.id)}" ${String(selected) === String(quote.id) ? "selected" : ""}>${escape(quote.reference || "Accepted quote")} · ${escape(money(quote.total_cents, quote.currency))}</option>`).join("");
+}
+function jobZoneOptions(selected) {
+  const zones = new Map([
+    ["America/St_Johns", "Newfoundland · St. John’s"], ["America/Halifax", "Atlantic · Halifax"],
+    ["America/Toronto", "Eastern · Toronto"], ["America/Winnipeg", "Central · Winnipeg"],
+    ["America/Regina", "Saskatchewan · Regina"], ["America/Edmonton", "Mountain · Edmonton"],
+    ["America/Vancouver", "Pacific · Vancouver"], ["America/Whitehorse", "Yukon · Whitehorse"],
+  ]);
+  if (!zones.has(selected)) zones.set(selected, selected.replaceAll("_", " "));
+  return [...zones].map(([zone, label]) => `<option value="${escape(zone)}" ${selected === zone ? "selected" : ""}>${escape(label)} (${escape(zone)})</option>`).join("");
+}
+function jobFormPayload(form) {
+  const value = (id) => $(id, form).value;
+  const status = value("#job-status");
+  return {
+    contact_id: value("#job-contact"), quote_id: value("#job-quote") || null,
+    title: value("#job-title"), description: value("#job-description"), service_address: value("#job-address"),
+    job_type: value("#job-type"), status,
+    scheduled_date: status === "awaiting_scheduling" ? "" : value("#job-date"),
+    arrival_start: status === "awaiting_scheduling" ? "" : value("#job-start"),
+    arrival_end: status === "awaiting_scheduling" ? "" : value("#job-end"),
+    time_zone: value("#job-zone"), private_notes: value("#job-private-notes"), customer_update: value("#job-update"),
+  };
+}
+function jobEditor(id, quoteId) {
+  const job = (state.jobs || []).find((item) => String(item.id) === String(id)) || {};
+  const quote = (state.quotes || []).find((item) => String(item.id) === String(quoteId) && item.status === "accepted");
+  if (quote) {
+    const existing = (state.jobs || []).find((item) => String(item.quote_id) === String(quote.id));
+    if (existing) return jobDetail(existing.id);
+  }
+  if (!state.contacts.length) {
+    openModal("First, add your customer.", "A job needs a customer to go with it.", '<div class="form-actions"><button class="button" data-action="close-add-contact">Add customer</button></div>');
+    return;
+  }
+  const context = base();
+  const contactId = job.contact_id || quote?.contact_id || state.contacts[0].id;
+  const title = job.title || quote?.line_items?.[0]?.description || "";
+  const description = job.description || (quote?.line_items || []).map((item) => item.description).join("\n");
+  const selectedQuote = job.quote_id || quote?.id || "";
+  const opened = openModal(job.id ? "Edit job" : "Add a job", job.id ? "Keep the visit and progress up to date." : "Save the work first. You choose when to share the customer page.", modalForm(`<div class="admin-job-editor"><section class="admin-job-form-section"><h3>Customer sees</h3><p class="note">These details appear on this job’s customer page when its link is enabled.</p><div class="form-grid"><div class="form-field"><label for="job-contact">Customer</label><select id="job-contact" required ${job.id ? "disabled" : ""}>${options(state.contacts, contactId)}</select>${job.id ? '<small>The customer stays with this job.</small>' : ""}</div><div class="form-field"><label for="job-quote">Accepted quote (optional)</label><select id="job-quote" ${job.id ? "disabled" : ""}>${jobQuoteOptions(contactId, selectedQuote)}</select><small>Quoted prices and terms stay unchanged.</small></div></div><div class="form-field"><label for="job-title">Job name</label><input id="job-title" value="${escape(title)}" placeholder="e.g. Furnace service" maxlength="160" required></div><div class="form-field"><label for="job-address">Service address</label><input id="job-address" value="${escape(job.service_address || "")}" autocomplete="street-address" maxlength="1000" required></div><div class="form-grid"><div class="form-field"><label for="job-type">Type of work</label><select id="job-type"><option value="service" ${job.job_type !== "installation" ? "selected" : ""}>Service</option><option value="installation" ${job.job_type === "installation" ? "selected" : ""}>Installation</option></select></div><div class="form-field"><label for="job-status">Job status</label><select id="job-status">${Object.entries(jobStatuses).map(([status, label]) => `<option value="${status}" ${(job.status || "awaiting_scheduling") === status ? "selected" : ""}>${label}</option>`).join("")}</select></div></div><div class="form-field"><label for="job-description">Work to be done</label><textarea id="job-description" maxlength="5000" placeholder="What’s included in this job?">${escape(description)}</textarea></div><div class="admin-job-schedule" id="job-schedule"><h3>Visit details</h3><p class="note" id="job-schedule-help">Choose a local date and arrival window. Times stay in the time zone below.</p><div class="form-field"><label for="job-date">Visit date</label><input id="job-date" type="date" value="${escape(job.scheduled_date || "")}" aria-describedby="job-schedule-help"></div><div class="form-grid"><div class="form-field"><label for="job-start">Arrive from</label><input id="job-start" type="time" value="${escape(job.arrival_start || "")}"></div><div class="form-field"><label for="job-end">Arrive by</label><input id="job-end" type="time" value="${escape(job.arrival_end || "")}"></div></div><div class="form-field"><label for="job-zone">Visit time zone</label><select id="job-zone">${jobZoneOptions(job.time_zone || defaultJobZone())}</select><small>The customer sees this time zone with their visit.</small></div></div><div class="form-field"><label for="job-update">New update for your customer (optional)</label><textarea id="job-update" maxlength="5000" placeholder="e.g. The part has arrived. We’ll confirm a visit date with you."></textarea><small>Saved to the customer page’s update history. No text or email is sent.</small></div></section><section class="admin-job-form-section admin-job-private"><h3>Internal notes</h3><p class="note">Only the business owner can see these. They never appear on the customer page.</p><div class="form-field"><label for="job-private-notes">Notes for you (optional)</label><textarea id="job-private-notes" maxlength="10000">${escape(job.private_notes || "")}</textarea></div></section></div>`, "Save job"), true);
+  const form = $("#dialog-form");
+  const syncSchedule = () => {
+    const status = $("#job-status", form).value;
+    ["#job-date", "#job-start", "#job-end"].forEach((selector) => {
+      const input = $(selector, form);
+      input.disabled = status === "awaiting_scheduling";
+      input.required = status === "scheduled";
+    });
+    $("#job-schedule-help", form).textContent = status === "awaiting_scheduling" ? "This job needs booking. Choose Booked when you have a date and arrival window." : "Choose a local date and arrival window. Times stay in the time zone below.";
+  };
+  $("#job-status", form).addEventListener("change", syncSchedule);
+  if (!job.id) {
+    $("#job-contact", form).addEventListener("change", () => { $("#job-quote", form).innerHTML = jobQuoteOptions($("#job-contact", form).value); });
+    $("#job-quote", form).addEventListener("change", () => {
+      const picked = (state.quotes || []).find((item) => String(item.id) === $("#job-quote", form).value);
+      if (!picked) return;
+      if (!$("#job-title", form).value.trim()) $("#job-title", form).value = picked.line_items?.[0]?.description || "";
+      if (!$("#job-description", form).value.trim()) $("#job-description", form).value = (picked.line_items || []).map((item) => item.description).join("\n");
+    });
+  }
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const submit = $('button[type="submit"]', form);
+    submit.disabled = true;
+    try {
+      const saved = await api(`${context}/jobs${job.id ? "/" + encodeURIComponent(job.id) : ""}`, { method: job.id ? "PATCH" : "POST", body: JSON.stringify(jobFormPayload(form)) });
+      if (opened !== modalGeneration || context !== base()) return;
+      await refresh();
+      if (opened !== modalGeneration || context !== base()) return;
+      await jobDetail(saved.id);
+      toast("Job saved.");
+    } catch (error) { if (opened === modalGeneration && context === base()) { showFormError($("#dialog-error"), error); submit.disabled = false; } }
+  });
+  syncSchedule();
+}
+function safeJobUrl(url) {
+  try {
+    if (!url) return "";
+    const parsed = new URL(url, location.href);
+    if (parsed.username || parsed.password) return "";
+    const localDemo = state.config.browser_demo && parsed.protocol === "file:" && parsed.pathname === location.pathname && /^#job\/[A-Za-z0-9_-]+$/.test(parsed.hash);
+    return ["https:", "http:"].includes(parsed.protocol) || localDemo ? parsed.href : "";
+  } catch { return ""; }
+}
+function jobHistory(job) {
+  return `<section class="admin-job-section"><h3>Customer update history</h3>${(job.public_updates || []).length ? `<ol class="delivery-timeline">${[...job.public_updates].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).map((update) => `<li class="delivery-event"><div><strong>${escape(jobStatuses[update.status] || update.status)}</strong><p class="admin-job-message">${escape(update.message)}</p></div><time datetime="${escape(update.created_at)}">${escape(fullDate(update.created_at))}</time></li>`).join("")}</ol>` : '<p class="note">No updates recorded yet. Add a customer update when there’s something to share.</p>'}</section>`;
+}
+function jobDetailMarkup(job) {
+  const link = job.link_enabled ? safeJobUrl(job.public_url) : "";
+  return `<div class="admin-job-detail"><div class="quote-detail-meta">${jobBadge(job.status)}<span>${job.job_type === "installation" ? "Installation" : "Service"}</span><span>${escape(job.reference || "")}</span></div><section class="admin-job-section"><h3>Service address</h3><p class="admin-job-message">${escape(job.service_address)}</p>${job.description ? `<h3>Work to be done</h3><p class="admin-job-message">${escape(job.description)}</p>` : ""}</section><section class="admin-job-section admin-job-visit"><h3>Visit</h3><strong>${escape(jobDate(job.scheduled_date))}</strong>${job.scheduled_date ? `<p>${escape(jobWindow(job))}<br><span class="note">${escape(job.time_zone)}</span></p>` : '<p class="note">Edit this job to add a date and arrival window.</p>'}</section>${job.quote_id ? `<section class="admin-job-section"><h3>Accepted quote</h3><button class="text-button" data-action="view-quote" data-id="${escape(job.quote_id)}">View ${escape(job.quote?.reference || "accepted quote")}</button><p class="note">The accepted quote keeps its original prices and terms.</p></section>` : ""}${jobHistory(job)}<section class="admin-job-section admin-job-private"><h3>Internal notes · owner only</h3><p class="note">These notes are never shown on the customer page.</p><p class="admin-job-message">${escape(job.private_notes || "No internal notes yet.")}</p></section><section class="quote-link-box"><h3>Customer job page</h3>${link ? `<a href="${escape(link)}" target="_blank" rel="noopener">Open customer job page</a><div class="copy-link-row"><input aria-label="Customer job link" value="${escape(link)}" readonly><button class="button secondary" data-action="copy-job-link" data-url="${escape(link)}">Copy link</button></div><p class="note">Anyone with this link can view this job. Share it only with your customer. Internal notes are never included. No text or email is sent.</p><div class="admin-job-link-actions"><button class="text-button" data-action="rotate-job-link" data-id="${escape(job.id)}">Replace link</button><button class="text-button" data-action="revoke-job-link" data-id="${escape(job.id)}">Turn off link</button></div>` : `<p class="note">The customer page is private until you enable its link. Anyone you share that link with can view this job only.</p><button class="button secondary" data-action="share-job" data-id="${escape(job.id)}">Enable customer link</button><p class="note">This creates a link to copy. No text or email is sent.</p>`}</section><div class="form-actions"><button class="button secondary" data-action="close">Close</button><button class="button" data-action="edit-job" data-id="${escape(job.id)}">Edit job</button></div></div>`;
+}
+async function jobDetail(id) {
+  const context = base();
+  const loading = openModal("Opening job", "The details will be ready in a moment.", loadingMarkup("Opening job"), true);
+  let job;
+  try { job = await api(`${context}/jobs/${encodeURIComponent(id)}`); }
+  catch (error) {
+    if (loading !== modalGeneration || context !== base()) return;
+    openModal("Couldn’t open this job", "Try again in a moment.", empty("Job unavailable", escape(error.message), '<button class="button secondary" data-action="close">Close</button>'));
+    throw error;
+  }
+  if (loading !== modalGeneration || context !== base()) return;
+  // Refresh this record so an edit opened from its detail uses the latest values.
+  const cachedJobs = state.jobs || [];
+  state.jobs = cachedJobs.some((item) => String(item.id) === String(job.id)) ? cachedJobs.map((item) => String(item.id) === String(job.id) ? job : item) : [job, ...cachedJobs];
+  openModal(escape(job.title), escape(job.contact_name), jobDetailMarkup(job), true);
+}
+async function changeJobLink(id, action) {
+  const context = base(), opened = modalGeneration;
+  await api(`${context}/jobs/${encodeURIComponent(id)}/${action}`, { method: "POST", body: "{}" });
+  if (opened !== modalGeneration || context !== base()) return;
+  await refresh();
+  if (opened !== modalGeneration || context !== base()) return;
+  await jobDetail(id);
+  toast(action === "revoke-link" ? "Customer link turned off." : action === "rotate-link" ? "New customer link ready. The old link no longer works." : "Customer link ready to copy.");
+}
+function jobLinkModal(id, action) {
+  const replacing = action === "rotate-link";
+  openModal(replacing ? "Replace this customer link?" : "Turn off this customer link?", "The current link will stop working immediately.", modalForm(`<p class="note">${replacing ? "A new link will be ready to copy. Share the new link with your customer yourself." : "The job and its history stay in your workspace. You can enable a new link later."} No text or email is sent.</p>`, replacing ? "Replace link" : "Turn off link"));
+  const context = base(), opened = modalGeneration;
+  $("#dialog-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const submit = $('button[type="submit"]', event.currentTarget);
+    submit.disabled = true;
+    try { await changeJobLink(id, action); }
+    catch (error) { if (opened === modalGeneration && context === base()) { showFormError($("#dialog-error"), error); submit.disabled = false; } }
+  });
+}
+let browserJobGeneration = 0;
+async function renderBrowserCustomerJob(token) {
+  const run = ++browserJobGeneration;
+  document.title = "Your job · Tradesuite";
+  $("#main").innerHTML = loadingMarkup("Opening your job");
+  try {
+    const job = await api(`/j/${encodeURIComponent(token)}/data`);
+    if (run !== browserJobGeneration || location.hash !== `#job/${token}`) return;
+    document.title = `${job.business.name} | Your job`;
+    $("#main").innerHTML = `<div class="browser-customer-quote"><a class="browser-quote-back" href="#jobs">Back to workspace</a>${jobPublicMarkup(job, { localPreview: true })}${draftDocumentLinks()}</div>`;
+  } catch (error) {
+    if (run !== browserJobGeneration || location.hash !== `#job/${token}`) return;
+    document.title = "Job unavailable | Tradesuite";
+    $("#main").innerHTML = `<div class="browser-customer-quote"><a class="browser-quote-back" href="#jobs">Back to workspace</a><section class="panel form-panel"><h1>This job page couldn’t be opened.</h1><p>${escape(error.message)}</p><p>Browser demo links work only in the browser where the job was created.</p></section>${draftDocumentLinks()}</div>`;
+  }
+}
 document.addEventListener("click", async (e) => {
   const decision = e.target.closest("[data-decision]");
   if (decision && state.config.browser_demo && location.hash.startsWith("#quote/")) {
@@ -854,6 +1100,14 @@ document.addEventListener("click", async (e) => {
       case "edit-contact":
         contactModal(el.dataset.id);
         break;
+      case "customer-jobs":
+        jobsUi = { ...newJobsUi(), contact: el.dataset.id };
+        location.hash = "#jobs";
+        break;
+      case "clear-job-customer":
+        jobsUi.contact = "";
+        render();
+        break;
       case "request":
         await requestModal();
         break;
@@ -866,6 +1120,50 @@ document.addEventListener("click", async (e) => {
       case "view-quote":
         await quoteDetail(el.dataset.id);
         break;
+      case "add-job":
+        jobEditor();
+        break;
+      case "quote-to-job":
+        await jobEditor(undefined, el.dataset.id);
+        break;
+      case "edit-job":
+        jobEditor(el.dataset.id);
+        break;
+      case "view-job":
+        await jobDetail(el.dataset.id);
+        break;
+      case "jobs-view":
+        jobsUi.view = el.dataset.view === "schedule" ? "schedule" : "list";
+        render();
+        break;
+      case "jobs-today":
+        jobsUi.day = jobToday();
+        render();
+        break;
+      case "share-job":
+        el.disabled = true;
+        try { await changeJobLink(el.dataset.id, "share"); } finally { el.disabled = false; }
+        break;
+      case "rotate-job-link":
+        jobLinkModal(el.dataset.id, "rotate-link");
+        break;
+      case "revoke-job-link":
+        jobLinkModal(el.dataset.id, "revoke-link");
+        break;
+      case "copy-job-link": {
+        const link = safeJobUrl(el.dataset.url);
+        if (!link) throw new Error("This customer link is unavailable.");
+        try {
+          await navigator.clipboard.writeText(link);
+          el.textContent = "Copied";
+          toast("Link copied");
+        } catch {
+          const input = el.parentElement.querySelector("input");
+          input.focus(); input.select();
+          toast("Select and copy the customer link above.");
+        }
+        break;
+      }
       case "copy-quote-link": {
         const link = safeQuoteUrl(el.dataset.url);
         if (!link) throw new Error("This customer link is unavailable.");
@@ -913,11 +1211,14 @@ document.addEventListener("click", async (e) => {
   }
 });
 async function switchBusiness(id) {
+  closeModal();
+  jobsUi = newJobsUi();
   state.business = state.businesses.find((x) => String(x.id) === String(id));
   Object.assign(state, {
     contacts: [],
     requests: [],
     quotes: [],
+    jobs: [],
     activity: [],
     dashboard: {},
   });

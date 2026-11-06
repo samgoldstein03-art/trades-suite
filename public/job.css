@@ -1,0 +1,66 @@
+body.job-page { padding: var(--space-12) var(--space-6) var(--space-8); }
+.customer-job-page { --job-width: 48rem; --job-padding: var(--space-8); --job-brand-size: var(--space-12); --job-skeleton-short: 42%; --job-skeleton-mid: 60%; --job-skeleton-wide: 75%; max-width: var(--job-width); margin: var(--space-0) auto; color: var(--color-ink); font-family: var(--font-body); font-size: var(--text-base); line-height: var(--leading-normal); }
+.customer-job-card { overflow: hidden; border: var(--border-width) solid var(--color-line); border-radius: var(--radius-lg); background: var(--color-surface); }
+.customer-job-business { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-6) var(--job-padding); border-bottom: var(--border-width) solid var(--color-line); }
+.customer-job-business > div { min-width: 0; }
+.customer-job-business img, .customer-job-brand-mark { width: var(--job-brand-size); height: var(--job-brand-size); border-radius: var(--radius-md); flex: 0 0 auto; }
+.customer-job-business img { object-fit: contain; }
+.customer-job-brand-mark { display: grid; place-items: center; background: var(--color-primary); color: var(--color-white); font-family: var(--font-display); font-size: var(--text-base); font-weight: var(--weight-semibold); }
+.customer-job-business strong { font-size: var(--text-base); font-weight: var(--weight-semibold); overflow-wrap: anywhere; }
+.customer-job-business div > span { display: block; margin-top: var(--space-1); font-size: var(--text-xs); }
+.customer-job-intro { padding: var(--space-8) var(--job-padding); }
+.customer-job-eyebrow { margin: var(--space-0); font-size: var(--text-xs); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; }
+.customer-job-intro h1 { margin: var(--space-4) var(--space-0); font-size: var(--text-2xl); overflow-wrap: anywhere; }
+.customer-job-intro > p:last-child:not(.customer-job-eyebrow) { margin: var(--space-0); font-size: var(--text-sm); }
+.customer-job-status { margin: var(--space-0) var(--job-padding) var(--space-8); padding: var(--space-6); border: var(--border-width) solid var(--color-line); border-radius: var(--radius-md); background: var(--color-bg); }
+.customer-job-status h2 { margin: var(--space-2) var(--space-0); font-size: var(--text-xl); }
+.customer-job-status > p:not(.customer-job-eyebrow) { margin: var(--space-0); font-size: var(--text-sm); }
+.customer-job-status > .customer-job-updated { margin-top: var(--space-4); font-size: var(--text-xs); }
+.customer-job-status-completed h2 { color: var(--color-success); }
+.customer-job-status-cancelled h2 { color: var(--color-danger); }
+.customer-job-section { padding: var(--space-8) var(--job-padding); border-top: var(--border-width) solid var(--color-line); }
+.customer-job-section h2, .customer-job-contact h2 { margin: var(--space-0); font-size: var(--text-lg); }
+.customer-job-section-heading { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.customer-job-timezone, .customer-job-order { font-size: var(--text-xs); overflow-wrap: anywhere; }
+.customer-job-visit { margin: var(--space-6) var(--space-0) var(--space-0); }
+.customer-job-visit > div { display: grid; grid-template-columns: minmax(var(--space-20), 1fr) 2fr; gap: var(--space-4); padding: var(--space-4) var(--space-0); border-bottom: var(--border-width) solid var(--color-line); }
+.customer-job-visit > div:first-child { padding-top: var(--space-0); }
+.customer-job-visit > div:last-child { padding-bottom: var(--space-0); border-bottom: none; }
+.customer-job-visit dt { font-size: var(--text-sm); }
+.customer-job-visit dd { margin: var(--space-0); font-size: var(--text-sm); font-weight: var(--weight-medium); white-space: pre-wrap; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.customer-job-work > p { margin: var(--space-4) var(--space-0) var(--space-0); white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-sm); }
+.customer-job-quote { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-4); }
+.customer-job-quote p { margin: var(--space-2) var(--space-0) var(--space-0); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.customer-job-quote strong { font-weight: var(--weight-semibold); }
+.customer-job-updates { list-style: none; margin: var(--space-6) var(--space-0) var(--space-0); padding: var(--space-0); }
+.customer-job-updates li { padding: var(--space-6) var(--space-0); border-top: var(--border-width) solid var(--color-line); }
+.customer-job-updates li:first-child { padding-top: var(--space-0); border-top: none; }
+.customer-job-updates li:last-child { padding-bottom: var(--space-0); }
+.customer-job-update-heading { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.customer-job-update-heading strong { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+.customer-job-update-heading time { font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.customer-job-updates li > p { margin: var(--space-2) var(--space-0) var(--space-0); white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-sm); }
+.customer-job-no-updates { margin: var(--space-4) var(--space-0) var(--space-0); font-size: var(--text-sm); }
+.customer-job-contact { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-6); padding: var(--space-6) var(--job-padding); border-top: var(--border-width) solid var(--color-line); background: var(--color-bg); }
+.customer-job-contact h2 { font-size: var(--text-base); }
+.customer-job-contact p { margin: var(--space-2) var(--space-0) var(--space-0); font-size: var(--text-xs); }
+.customer-job-contact-links { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.customer-job-page .button { min-height: var(--touch-target); }
+.customer-job-page a:focus-visible, .customer-job-page button:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+.customer-job-footer { margin-top: var(--space-6); text-align: center; font-size: var(--text-xs); }
+.customer-job-footer strong { font-weight: var(--weight-medium); }
+.customer-job-demo-notice { margin: var(--space-0) var(--space-0) var(--space-4); padding: var(--space-4); border: var(--border-width) solid var(--color-warning-line); border-radius: var(--radius-md); color: var(--color-warning); background: var(--color-warning-soft); text-align: center; font-size: var(--text-xs); }
+.customer-job-unavailable { padding: var(--space-12) var(--job-padding); }
+.customer-job-unavailable h1 { margin: var(--space-4) var(--space-0); font-size: var(--text-2xl); }
+.customer-job-unavailable > p:not(.customer-job-eyebrow) { margin: var(--space-4) var(--space-0) var(--space-0); font-size: var(--text-sm); }
+.customer-job-unavailable .button { margin-top: var(--space-6); }
+.customer-job-loading-brand { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-6) var(--job-padding); border-bottom: var(--border-width) solid var(--color-line); }
+.customer-job-loading-content { display: flex; flex-direction: column; gap: var(--space-6); padding: var(--space-8) var(--job-padding); }
+.customer-job-skeleton { display: block; background: var(--color-skeleton); border-radius: var(--radius-sm); animation: skeleton-pulse var(--skeleton-duration) ease-in-out infinite alternate; }
+.customer-job-skeleton-logo { width: var(--job-brand-size); height: var(--job-brand-size); flex-shrink: 0; }
+.customer-job-skeleton-name { width: var(--job-skeleton-short); height: var(--space-4); }
+.customer-job-skeleton-title { width: var(--job-skeleton-mid); height: var(--space-12); }
+.customer-job-skeleton-line { width: var(--job-skeleton-wide); height: var(--space-4); }
+.customer-job-skeleton-block { width: 100%; height: var(--space-20); }
+@media (max-width: 38rem) { body.job-page { padding: var(--space-4) var(--space-4) var(--space-6); } .customer-job-page { --job-padding: var(--space-6); } .customer-job-contact-links { width: 100%; } .customer-job-contact-links .button { flex: 1 1 auto; } }
+@media (max-width: 24rem) { .customer-job-page { --job-padding: var(--space-4); } .customer-job-status { padding: var(--space-4); } .customer-job-intro h1 { font-size: var(--text-xl); } .customer-job-visit > div { grid-template-columns: 1fr; gap: var(--space-2); } .customer-job-quote > .button { width: 100%; } }

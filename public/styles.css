@@ -390,3 +390,71 @@ dialog:has(.quote-editor), dialog:has(.quote-detail), dialog.modal-wide { width:
 }
 
 .customer-quote-view #main:has(.legal-shell) { padding: var(--space-0); }
+
+/* Jobs use the same cards and controls as the rest of the workspace. */
+.jobs-view-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-4); margin-bottom: var(--space-6); }
+.jobs-view-bar > .note { max-width: var(--empty-copy-width); margin: var(--space-0); }
+.jobs-view-switch { display: flex; gap: var(--space-2); }
+.jobs-toolbar { flex-wrap: wrap; }
+.jobs-toolbar .search-field { flex: 1; }
+.jobs-date-controls { display: flex; align-items: flex-end; flex-wrap: wrap; gap: var(--space-4); margin-bottom: var(--space-6); }
+.jobs-date-controls .form-field { display: grid; gap: var(--space-2); margin-bottom: var(--space-0); }
+.jobs-date-controls > .button { flex-shrink: 0; }
+.jobs-range-label { margin-bottom: var(--space-6); }
+.jobs-range-label .note { margin-bottom: var(--space-0); }
+.jobs-contact-filter { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-4); font-size: var(--text-sm); }
+.jobs-agenda-day { margin-bottom: var(--space-6); }
+.jobs-agenda-day .table-panel, .jobs-dashboard .table-panel { border: 0; border-radius: 0; }
+.jobs-dashboard { margin: var(--space-0) var(--space-0) var(--space-8); }
+.admin-job-status { white-space: normal; text-align: center; }
+.admin-job-status.scheduled, .admin-job-status.in_progress { background: var(--color-primary-soft); color: var(--color-primary); }
+.admin-job-status.completed { background: var(--color-success-soft); color: var(--color-success); border-color: var(--color-success-line); }
+.admin-job-status.waiting_parts, .admin-job-status.follow_up { background: var(--color-warning-soft); color: var(--color-warning); border-color: var(--color-warning-line); }
+.admin-job-status.cancelled { background: var(--color-muted-surface); color: var(--color-muted-strong); }
+.admin-job-empty-line { padding: var(--space-0) var(--space-6) var(--space-6); color: var(--color-muted-strong); font-size: var(--text-sm); }
+.admin-job-empty-line p { margin-top: var(--space-0); }
+.admin-job-booking { padding: var(--space-6); border-top: var(--border-width) solid var(--color-line); }
+.admin-job-booking h3 { margin: var(--space-0) var(--space-0) var(--space-4); font-size: var(--text-sm); }
+.admin-job-booking-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-3) var(--space-0); }
+.admin-job-booking-row + .admin-job-booking-row { border-top: var(--border-width) solid var(--color-line); }
+.admin-job-booking-row > span { min-width: 0; }
+.admin-job-booking-row strong, .admin-job-booking-row small { display: block; overflow-wrap: anywhere; }
+.admin-job-booking-row strong { font-size: var(--text-sm); }
+.admin-job-booking-row small { margin-top: var(--space-1); font-size: var(--text-xs); color: var(--color-muted-strong); }
+.admin-job-booking-row .text-button { flex-shrink: 0; }
+.admin-job-form-section + .admin-job-form-section { margin-top: var(--space-8); }
+.admin-job-editor .form-grid { margin-bottom: var(--space-6); }
+.admin-job-editor input, .admin-job-editor select, .admin-job-editor textarea { width: 100%; max-width: 100%; }
+dialog:has(.admin-job-editor) .modal-heading > div, dialog:has(.admin-job-detail) .modal-heading > div { min-width: 0; overflow-wrap: anywhere; }
+.admin-job-form-section > h3, .admin-job-section > h3, .admin-job-schedule > h3, .admin-job-detail .quote-link-box > h3 { margin: var(--space-0) var(--space-0) var(--space-3); font-size: var(--text-base); }
+.admin-job-form-section > .note { margin-top: var(--space-0); margin-bottom: var(--space-6); }
+.admin-job-schedule, .admin-job-private { padding: var(--space-6); border: var(--border-width) solid var(--color-line); border-radius: var(--radius-lg); background: var(--color-bg); }
+.admin-job-schedule { margin-bottom: var(--space-6); }
+.admin-job-schedule .form-field:last-child, .admin-job-private .form-field { margin-bottom: var(--space-0); }
+.admin-job-section { padding: var(--space-6) var(--space-0); border-bottom: var(--border-width) solid var(--color-line); }
+.admin-job-section > h3:not(:first-child) { margin-top: var(--space-6); }
+.admin-job-section.admin-job-private { margin: var(--space-6) var(--space-0); padding: var(--space-6); }
+.admin-job-section > p:last-child { margin-bottom: var(--space-0); }
+.admin-job-message { white-space: pre-wrap; overflow-wrap: anywhere; }
+.admin-job-visit > strong { display: block; font-family: var(--font-display); font-size: var(--text-lg); }
+.admin-job-visit > p { margin-bottom: var(--space-0); }
+.admin-job-visit { overflow-wrap: anywhere; }
+.admin-job-detail .delivery-event { align-items: flex-start; }
+.admin-job-detail .delivery-event > div { min-width: 0; }
+.admin-job-detail .delivery-event p { margin-bottom: var(--space-0); }
+.admin-job-link-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }
+@media (max-width: 600px) {
+  .jobs-view-bar { align-items: stretch; }
+  .jobs-view-switch { width: 100%; }
+  .jobs-view-switch .button { flex: 1; }
+  .jobs-toolbar .search-field { flex-basis: 100%; }
+  .jobs-date-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: end; }
+  .jobs-date-controls > .button { grid-column: 1 / -1; }
+  .jobs-date-controls input, .jobs-date-controls select { width: 100%; }
+  .admin-job-schedule, .admin-job-private, .admin-job-section.admin-job-private { padding: var(--space-4); }
+  .admin-job-booking { padding: var(--space-4); }
+  .admin-job-empty-line { padding: var(--space-0) var(--space-4) var(--space-4); }
+  .admin-job-booking-row { align-items: flex-start; }
+  .admin-job-link-actions { flex-direction: column; align-items: stretch; }
+  .admin-job-link-actions .text-button { justify-content: flex-start; }
+}

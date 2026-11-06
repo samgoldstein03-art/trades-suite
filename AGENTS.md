@@ -25,3 +25,9 @@ quote terms unchanged. The private business Activity log intentionally records
 sent message bodies, including their customer quote links. A public
 browser demo simulates SMS and email; publishing code or that demo does not
 verify a hosted backend or real message delivery.
+
+Jobs and scheduling extend the same business/contact/quote/activity records.
+Keep internal job notes private. Public job links are optional, read-only bearer
+capabilities for one job, with explicit replacement and revocation. Never write
+job tokens or customer addresses to console/access logs. No messaging, payments,
+maintenance, or missed-call behavior is implied by this module.

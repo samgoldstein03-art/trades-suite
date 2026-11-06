@@ -165,6 +165,60 @@ export function openDatabase(dbPath) {
     created_at TEXT NOT NULL,
     FOREIGN KEY(business_id,contact_id) REFERENCES contacts(business_id,id)
   ); PRAGMA user_version = 4;`);
+  // Jobs extend existing customer/quote records without rewriting delivered terms.
+  // The three-column quote key also prevents a job from pairing a quote with a
+  // different customer in the same business.
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS quote_job_customer ON quotes(business_id,id,contact_id);
+    CREATE TABLE IF NOT EXISTS jobs (
+      business_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      contact_id TEXT NOT NULL,
+      customer_name TEXT NOT NULL,
+      quote_id TEXT,
+      reference TEXT NOT NULL,
+      title TEXT NOT NULL,
+      job_type TEXT NOT NULL CHECK(job_type IN ('service','installation')),
+      status TEXT NOT NULL CHECK(status IN ('awaiting_scheduling','scheduled','waiting_parts','in_progress','completed','follow_up','cancelled')),
+      description TEXT NOT NULL DEFAULT '',
+      service_address TEXT NOT NULL,
+      scheduled_date TEXT NOT NULL DEFAULT '',
+      arrival_start TEXT NOT NULL DEFAULT '',
+      arrival_end TEXT NOT NULL DEFAULT '',
+      time_zone TEXT NOT NULL,
+      private_notes TEXT NOT NULL DEFAULT '',
+      mode TEXT NOT NULL CHECK(mode IN ('demo','twilio')),
+      public_token TEXT UNIQUE,
+      public_url TEXT,
+      link_revoked_at TEXT,
+      shared_at TEXT,
+      public_updated_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(business_id,id),
+      UNIQUE(business_id,quote_id),
+      FOREIGN KEY(business_id) REFERENCES businesses(id),
+      FOREIGN KEY(business_id,contact_id) REFERENCES contacts(business_id,id),
+      FOREIGN KEY(business_id,quote_id) REFERENCES quotes(business_id,id),
+      FOREIGN KEY(business_id,quote_id,contact_id) REFERENCES quotes(business_id,id,contact_id)
+    );
+    CREATE INDEX IF NOT EXISTS jobs_schedule ON jobs(business_id,scheduled_date,arrival_start);
+    CREATE INDEX IF NOT EXISTS jobs_status ON jobs(business_id,status,created_at);
+    CREATE TABLE IF NOT EXISTS job_updates (
+      business_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      job_id TEXT NOT NULL,
+      message TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(business_id,id),
+      FOREIGN KEY(business_id,job_id) REFERENCES jobs(business_id,id)
+    );
+    CREATE INDEX IF NOT EXISTS job_updates_job ON job_updates(business_id,job_id,created_at);
+    PRAGMA user_version = 5;
+  `);
+  if (!db.prepare("PRAGMA table_info(activity)").all().some((column) => column.name === "job_id"))
+    db.exec("ALTER TABLE activity ADD COLUMN job_id TEXT");
   return db;
 }
 

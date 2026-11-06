@@ -105,3 +105,9 @@ There is no conversion percentage, review-received metric, revenue metric or his
 - DM Sans and Manrope loaded successfully on the admin dashboard, public customer quote and Privacy draft. The old owned demo server was restarted to update its font allowlist while preserving the existing customer quote URL and saved terms.
 - The actual Express/SQLite demo remains explicitly simulated. These checks do not claim approved legal documents, real SMS/email receipts, Google review detection or a production deployment.
 - All six admin routes were also checked at a narrow phone viewport (about 360 CSS pixels after the browser's existing zoom): client and scroll widths matched, with no horizontal page overflow. The existing responsive layouts were retained.
+
+## Subsequent Jobs and scheduling addition
+
+Jobs and scheduling are now implemented; the historical audit inventory above describes the earlier presentation-only pass. The new owner list, weekly agenda, editor/detail and public customer job page reuse the existing design tokens, self-hosted DM Sans/Manrope, flat borders, skeletons and plain-spoken copy. They add no social proof, conversion metric, percent-complete estimate, marketing page or provider-delivery claim. The standalone preview remains simulated and clearly labelled sample data.
+
+The owner-review Terms/Privacy drafts still require actual operator details and reviewed coverage of job addresses, published progress and private-link sharing. Invoices/payment tracking, equipment/maintenance and missed-call text-back remain unbuilt.

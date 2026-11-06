@@ -1,8 +1,8 @@
 # Trades Suite
 
-A simple customer desk for HVAC, plumbing, and electrical shops. Pick a business, add a customer, ask for a Google review, or send a quote they can accept from their phone. Each business has its own customers, activity, review requests, quotes, and sending settings.
+A simple customer desk for HVAC, plumbing, and electrical shops. Pick a business, add a customer, ask for a Google review, or send a quote they can accept from their phone. Each business has its own customers, jobs, activity, review requests, quotes, and sending settings.
 
-This repository implements **Phases 1 and 2** using **Node.js, Express, and SQLite**, with a plain HTML/CSS/JavaScript interface. It has one admin workspace shared across businesses. Hosted installations require one admin password; there are no separate business accounts. Customer quote pages need no login.
+This repository implements **Phases 1 and 2, plus jobs and scheduling** using **Node.js, Express, and SQLite**, with a plain HTML/CSS/JavaScript interface. It has one admin workspace shared across businesses. Hosted installations require one admin password; there are no separate business accounts. Customer quote pages and optional read-only job pages need no login.
 
 The interface keeps the original warm green design system: background #f6f7f3, ink #243d34, deep-green #184c3f actions, lime #daecbb and orange #ce723a accents, white sidebar, 16px panels, and self-hosted DM Sans/Manrope fonts. See [DESIGN_NOTES.md](DESIGN_NOTES.md) for current screen and measurement notes.
 
@@ -16,7 +16,8 @@ Use `npm run demo` for a pilot walkthrough of the real Express server and SQLite
 2. Open Quotes, create a quote for an existing sample contact, and save it. Send by text, email, or both. Confirm that the delivery history says **Simulated**.
 3. Open the customer link in a separate browser tab, check the work and total, and accept or decline this sample quote. Confirm the recorded response in Quotes and Activity in the owner workspace.
 4. Create a second unanswered quote and use its demo reminder controls to test the day-2 and day-5 sequence. Check the delivery history and stop-reminders control. Follow the review-request demo steps below to check its single three-day reminder.
-5. Restart the demo on the same port and database file to confirm the saved records remain. Check both draft document links and review their owner-completion questions.
+5. Open the accepted quote and choose **Create job**, or open **Jobs & schedule** to add work for an existing customer. Use a clearly labelled sample address, book an arrival window, and publish a sample update. Enable the customer link and open it in another tab. Verify that internal notes are absent and disabling or replacing the link makes the old link unavailable.
+6. Restart the demo on the same port and database file to confirm the saved records remain. Check both draft document links and review their owner-completion questions.
 
 This is a working product demonstration with simulated providers. It does not verify a publicly hosted installation or real message delivery. Before a real-data pilot, the owner still needs reviewed legal documents, an appropriate running installation, and a consenting test of each business's actual SMS/email sending and opt-out setup. Missed-call text-back remains planned.
 
@@ -83,7 +84,7 @@ The seed command refuses a nonempty workspace or a server using Twilio mode. It 
 4. **Check Activity.** The message and the request's status changes are recorded with timestamps. Dashboard totals and recent activity update for the selected business.
 5. **Mark done.** When you see the customer's review, mark the request done. The app does not read Google reviews or guess whether a review has been posted.
 
-Use the business switcher to work with another business. Changing businesses changes the customer list, review requests, quotes, dashboard, and activity together.
+Use the business switcher to work with another business. Changing businesses changes the customer list, review requests, quotes, jobs, dashboard, and activity together.
 
 Changing a customer's phone number clears their text permission. Save the new number, then edit the customer again to confirm permission for that number. An older request will not nudge the new number; finish that request before starting a new one.
 
@@ -236,6 +237,21 @@ The opt-out belongs to the existing contact in the selected business. It blocks 
 
 Keep the unsubscribe endpoint reachable through the public HTTPS host used for customer quote links, outside the admin login. Treat unsubscribe links as private customer links, and exclude them from public logs. For live email, configure the SMTP provider to apply a valid **DKIM signature covering both unsubscribe headers**; receiving mail systems may hide their one-click action without it. The app supplies the headers and public handler, while the provider supplies sender-domain signing. See [RFC 8058, sections 3 and 4](https://www.rfc-editor.org/rfc/rfc8058.html#section-3). Verify the received message's headers and test an unsubscribe using a consenting test contact before sending to real customers.
 
+## Jobs, appointments and customer progress
+
+**Jobs & schedule** keeps service / repair and installation work linked to the existing customer. Create a job directly, or choose **Create job** on an accepted quote. The quote stays unchanged; repeating conversion opens the existing job rather than duplicating it. Jobs are separate for each business.
+
+- Record the work, service address, and status: Awaiting scheduling, Booked, Waiting for parts, Work underway, Completed, Follow-up needed, or Cancelled.
+- Book a date and arrival window in the stated time zone. The window is when you expect to arrive, not a promised completion time. Dates stay as entered rather than shifting with the viewer's time zone. Booked jobs require a complete window.
+- Use the list's search/status/type filters and the schedule's selected week to find appointments. Work without an appointment is listed separately. The dashboard shows recorded upcoming visits and work still needing booking. It does not invent progress percentages or dispatch locations.
+- **Internal notes** stay in the owner workspace. **Customer update** publishes the entered message to that job's progress history. Status and appointment changes are also recorded. Editing internal notes alone does not claim new customer progress.
+- Enable a **customer link** when ready to share it. Copy and send it yourself; this module sends no SMS or email. Anyone with that private link can read that one job, including its service address and any linked accepted quote. They cannot edit the job or browse other customers. The page checks for recorded updates while open; it is not live technician tracking.
+- Turn the link off to make it unavailable, or replace it to revoke the old link immediately. Enabling it after disabling creates a fresh link. A recipient can retain information already viewed, so share only the intended scope and public updates.
+
+Customer job links use the same public origin as quote links (`QUOTE_PUBLIC_BASE_URL`, falling back to the admin/Render origin). Local demo mode can use its localhost address. Public pages, data and scoped business logos are readable outside the admin password; job mutations remain behind admin and same-origin checks. Responses use no-store/no-referrer/noindex headers. Keep customer tokens out of proxy/access logs.
+
+No invoices, payments, customer messaging, photos, equipment register, or automatic review request on completion is added. The Terms/Privacy drafts still need owner review covering job addresses, progress history and private-link sharing before real customer use.
+
 ## Settings and storage
 
 | Environment variable          | Default             | Purpose                                                                 |
@@ -264,7 +280,7 @@ Keep the unsubscribe endpoint reachable through the public HTTPS host used for c
 
 Run one app instance for a workspace and use persistent local storage. The default data directory and `.env` are excluded from Git. For a simple consistent backup, stop the server, copy the database and its existing companion files together with the uploads folder to private backup storage, and restart. Restore them together. Store a separate protected backup of the environment configuration; it contains secrets. Do not remove the database to clear a warning or retry an uncertain message.
 
-This app has **one admin view and no per-business logins**. Private localhost use can run without a password. A hosted installation requires `ADMIN_PASSWORD` and an HTTPS admin origin; the app refuses to start without them. Browser HTTP Basic authentication protects the admin pages, API, and uploaded logos using `ADMIN_USERNAME` and `ADMIN_PASSWORD`. Customer quote links, their public decision endpoints, `/healthz`, and the signed Twilio webhook remain reachable without that password. The owner-review drafts at `/terms` and `/privacy`, plus `/legal.css`, are also publicly readable by GET/HEAD; admin data and uploads remain protected.
+This app has **one admin view and no per-business logins**. Private localhost use can run without a password. A hosted installation requires `ADMIN_PASSWORD` and an HTTPS admin origin; the app refuses to start without them. Browser HTTP Basic authentication protects the admin pages, API, and uploaded logos using `ADMIN_USERNAME` and `ADMIN_PASSWORD`. Customer quote links, their public decision endpoints, read-only customer job links, `/healthz`, and the signed Twilio webhook remain reachable without that password. The owner-review drafts at `/terms` and `/privacy`, plus `/legal.css`, are also publicly readable by GET/HEAD; admin data and uploads remain protected.
 
 API requests are limited to **300 per five minutes per IP address**. The shared admin sign-in has a stricter limit of **10 failed attempts per 15 minutes per IP address**, covering pages, API routes, and uploads. Successful sign-ins do not consume that failed-attempt allowance, but once it is exhausted even correct credentials must wait for the window to reset. A blocked request returns HTTP 429 with a `Retry-After` header. Counters are held in memory and reset when the process restarts; this matches the single-instance deployment below.
 
@@ -278,11 +294,13 @@ Set `ADMIN_ORIGIN=https://your-admin.example` to the exact external origin, with
 
 **Built in Phase 2:** business-scoped quotes with line items, tax, totals, expiry, and customer-facing notes; drafts and status filters; delivery by SMS and optional email with unsubscribe headers and a visible footer; customer opt-outs shared across sending channels; mobile-friendly customer links with Accept/Decline; activity and dashboard integration; two cancellable reminders after two and five days through each channel that successfully sent the original quote; simulated sends and automated tests.
 
-**Agreed future roadmap, outside this audit:** jobs and scheduling; invoices and payment tracking; missed-call text-back; equipment and maintenance tracking. These modules have not been implemented.
+**Built after Phase 2:** business-scoped jobs and appointment windows; accepted-quote conversion; owner list and weekly schedule; separate internal notes and published updates; optional read-only customer job links with replacement and revocation; dashboard and activity integration.
+
+**Agreed future roadmap:** invoices and payment tracking; missed-call text-back; equipment and maintenance tracking. These modules have not been implemented.
 
 **Planned for Phase 3:** missed-call text-back. It is not built or shown as a working control. There are no per-business logins, payments, billing, mobile app, Google review detection, or delivery-receipt processing in these phases.
 
-The data model keeps businesses as the owner of contacts, review requests, quotes, messages, and activity records. Relationships carry `business_id`, and references are checked within the selected business. Quotes reuse the existing business/contact IDs and activity stream; future missed-call records can use those same relationships without combining customers from different businesses. Twilio and SMTP credentials remain environment configuration rather than becoming business data.
+The data model keeps businesses as the owner of contacts, review requests, quotes, jobs, messages, and activity records. Relationships carry `business_id`, and references are checked within the selected business. Quotes reuse the existing business/contact IDs and activity stream; future missed-call records can use those same relationships without combining customers from different businesses. Twilio and SMTP credentials remain environment configuration rather than becoming business data.
 
 ## Hosting
 
@@ -302,7 +320,7 @@ This template uses **one paid web service and a 1 GB persistent disk**. Render r
 6. Add a sample business and customer, send a simulated request, and check Activity. Use **Test the 3-day nudge**, verify one follow-up, and mark the request done. Restart the service and confirm the records and any uploaded logo remain. Confirm an unauthenticated browser is asked to sign in and `/healthz` returns HTTP 200.
 7. Create a demo quote, send its link, and open that link in a separate browser session without the admin password. Accept it and check that its status and Activity update. Test reminders on a second unanswered quote. Render's address also becomes the default customer quote origin; set `QUOTE_PUBLIC_BASE_URL` only if these links should use a different configured HTTPS origin.
 
-The shared login protects the dashboard, customer data, admin API, and uploaded logos. Customer quote links and decisions, the readiness route, and the signed Twilio webhook remain reachable without the admin password. This is one owner login for the whole workspace; it does not create separate business accounts.
+The shared login protects the dashboard, customer data, admin API, and uploaded logos. Customer quote links and decisions, read-only customer job links, the readiness route, and the signed Twilio webhook remain reachable without the admin password. This is one owner login for the whole workspace; it does not create separate business accounts.
 
 ### Turn on real SMS
 

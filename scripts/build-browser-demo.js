@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createBrowserQuotes } from "./browser-quotes.js";
+import { createBrowserJobs } from "./browser-jobs.js";
 
 // This adapter is only bundled into the standalone sample. The installed app
 // continues to use Express, SQLite and the per-business Twilio transport.
@@ -21,6 +22,7 @@ export function createBrowserDemo(storage) {
     data.activity.unshift({ id: id(), business_id: business.id, contact_id: contact?.id || null, contact_name: contact?.name || "", kind, label, body, mode: "demo", created_at });
   };
   const quotes = createBrowserQuotes({ getData: () => data, id, now, log });
+  const jobs = createBrowserJobs({ getData: () => data, id, now, log });
   const phone = (value) => {
     const normalized = String(value || "").replace(/[\s()\-]/g, "");
     if (!/^\+[1-9]\d{7,14}$/.test(normalized)) throw new Error("Enter a phone number with a country code, such as +14165550123.");
@@ -117,6 +119,7 @@ export function createBrowserDemo(storage) {
     const parsedPath = new URL(path, "https://demo.example.test");
     const parts = parsedPath.pathname.split("/").filter(Boolean).map(decodeURIComponent);
     if (parts[0] === "q") { const result = quotes.publicRoute(parts, method, values); save(); return copy(result); }
+    if (parts[0] === "j") { const result = jobs.publicRoute(parts, method); save(); return copy(result); }
     if (parts[0] !== "api" || parts[1] !== "businesses") throw new Error("That page is not available in the browser demo.");
     const b = data.businesses.find((x) => x.id === parts[2]);
     if (!b) throw new Error("That business could not be found.");
@@ -125,6 +128,7 @@ export function createBrowserDemo(storage) {
     const requests = () => data.requests.filter((r) => r.business_id === b.id);
     const activity = () => data.activity.filter((a) => a.business_id === b.id).sort((a, c) => new Date(c.created_at) - new Date(a.created_at));
     if (parts[3] === "quotes") result = quotes.adminRoute(b, parts, method, values, parsedPath.searchParams);
+    else if (parts[3] === "jobs") result = jobs.adminRoute(b, parts, method, values, parsedPath.searchParams);
     else if (parts.length === 3 && method === "PATCH") {
       result = Object.assign(b, businessValues(values, b));
       log(b, null, "business_updated", "Business details updated.");
@@ -181,6 +185,8 @@ export function buildBrowserDemo(output) {
   const css = readFileSync(resolve(root, "public/styles.css"), "utf8").replace(/@import\s+url\("\/(?:fonts|design-system)\.css"\);\s*/g, "");
   const fonts = readFileSync(resolve(root, "public/fonts.css"), "utf8").replace(/url\(\/fonts\/([^)]+)\)/g, (_, file) => `url(data:font/ttf;base64,${readFileSync(resolve(root, "public/fonts", file)).toString("base64")})`);
   const quoteRenderer = readFileSync(resolve(root, "public/quote.js"), "utf8").split("async function quotePublicRequest")[0];
+  const jobRenderer = readFileSync(resolve(root, "public/job.js"), "utf8").split("async function jobPublicRequest")[0];
+  const jobCss = readFileSync(resolve(root, "public/job.css"), "utf8");
   // Keep the customer's standalone stylesheet from changing the admin screens.
   const quoteCss = readFileSync(resolve(root, "public/quote.css"), "utf8").split("\n").map((line) => {
     const match = line.match(/^(\s*)([^@{}][^{]*)\{(.*)$/);
@@ -196,10 +202,10 @@ export function buildBrowserDemo(output) {
   app = app.replace("Public demo · Use sample details only. Anyone with this link can see changes. No real texts are sent.", "Browser demo · Sample data only. No real texts are sent. Changes stay in this browser. Automatic follow-ups run while this file is open.");
   const boot = `const browserStorage = (() => { const memory = new Map(); return { getItem(key) { try { return localStorage.getItem(key) ?? memory.get(key) ?? null; } catch { return memory.get(key) ?? null; } }, setItem(key, value) { memory.set(key, String(value)); try { localStorage.setItem(key, String(value)); } catch {} } }; })();\nconst browserDemoApi = (${createBrowserDemo.toString()})(browserStorage);\n`;
   const favicon = `data:image/svg+xml;base64,${readFileSync(resolve(root, "public/favicon.svg")).toString("base64")}`;
-  html = html.replace('<link rel="stylesheet" href="/styles.css" />', `<style>${fonts}\n${sharedCss}\n${css}\n${quoteCss}\n${legalCss}</style>`).replace('<script type="module" src="/app.js"></script>', "");
+  html = html.replace('<link rel="stylesheet" href="/styles.css" />', `<style>${fonts}\n${sharedCss}\n${css}\n${quoteCss}\n${jobCss}\n${legalCss}</style>`).replace('<script type="module" src="/app.js"></script>', "");
   html = html.replace('href="/favicon.svg"', `href="${favicon}"`);
   html = html.replace(/<title>[^<]*<\/title>/, '<title>Overview | Tradesuite demo</title>\n<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data:; font-src data:; connect-src \'none\'; form-action \'none\'; base-uri \'none\'">');
-  html = html.replace("</body>", `<script>${(`const browserLegalDocuments = ${JSON.stringify(browserLegalDocuments)};\nconst createBrowserQuotes = ${createBrowserQuotes.toString()};\n` + boot + quoteRenderer + app).replace(/<\/script/gi, "<\\/script")}</script>\n</body>`);
+  html = html.replace("</body>", `<script>${(`const browserLegalDocuments = ${JSON.stringify(browserLegalDocuments)};\nconst createBrowserQuotes = ${createBrowserQuotes.toString()};\nconst createBrowserJobs = ${createBrowserJobs.toString()};\n` + boot + quoteRenderer + jobRenderer + app).replace(/<\/script/gi, "<\\/script")}</script>\n</body>`);
   html = html.replace(/href="\/(terms|privacy)"/g, 'href="#$1"');
   const target = output ? resolve(output) : resolve(root, "Tradesuite Demo.html");
   mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, html);
