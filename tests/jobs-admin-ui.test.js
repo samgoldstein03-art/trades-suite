@@ -182,7 +182,7 @@ test("job editor posts a scoped payload and keeps customer-facing and internal f
   const modal = { showModal() {}, close() {} };
   const context = adminContext({ document: { querySelector: (selector) => ({ "#dialog-form": form, "#modal-content": content, "#modal": modal })[selector] }, calls: [], notices: [] });
   run(context, `state.jobs=[];api=async (path,options)=>{calls.push({path,options});return {id:"saved-job"}};
-    refresh=async()=>{};jobDetail=async(id)=>calls.push({detail:id});toast=(message)=>notices.push(message);`);
+    refresh=async()=>{};showJobDetail=(job)=>calls.push({detail:job.id});toast=(message)=>notices.push(message);`);
   run(context, 'jobEditor(undefined,"q1")');
   assert.match(content.innerHTML, /Customer sees/);
   assert.match(content.innerHTML, /Internal notes/);
@@ -205,7 +205,7 @@ test("existing job editor keeps customer and accepted quote fixed while patching
   const form = { querySelector: (selector) => fields[selector], addEventListener: (name, handler) => { if (name === "submit") submit = handler; } };
   const content = { innerHTML: "" };
   const context = adminContext({ document: { querySelector: (selector) => ({ "#dialog-form": form, "#modal-content": content, "#modal": { showModal() {} } })[selector] }, calls: [] });
-  run(context, 'api=async(path,options)=>{calls.push({path,options});return {id:"j1"}};refresh=async()=>{};jobDetail=async()=>{};toast=()=>{};jobEditor("j1")');
+  run(context, 'api=async(path,options)=>{calls.push({path,options});return {id:"j1"}};refresh=async()=>{};showJobDetail=()=>{};toast=()=>{};jobEditor("j1")');
   assert.match(content.innerHTML, /id="job-contact" required disabled/);
   assert.match(content.innerHTML, /id="job-quote" disabled/);
   await submit({ preventDefault() {} });
@@ -260,4 +260,105 @@ test("a freshly accepted quote detail makes that quote available to job creation
   await run(context, 'quoteDetail("q1")');
   assert.match(content.innerHTML, /data-action="quote-to-job" data-id="q1"/);
   assert.equal(run(context, 'state.quotes[0].status'), "accepted");
+});
+
+function editorFixture() {
+  const fields = formFields();
+  let submit;
+  const form = { querySelector: (selector) => fields[selector], addEventListener: (name, handler) => { if (name === "submit") submit = handler; } };
+  const content = { innerHTML: "" }, errors = { innerHTML: "" };
+  const modal = { showModal() {}, close() {} };
+  const context = adminContext({
+    document: { querySelector: (selector) => ({ "#dialog-form": form, "#modal-content": content, "#modal": modal, "#dialog-error": errors })[selector] },
+    savedRecord: { ...job, id: "saved-job" }, calls: [], notices: [], resolveSave: null, rejectRefresh: null, refreshes: 0,
+  });
+  run(context, 'toast=message=>notices.push(message)');
+  return { context, fields, content, errors, submit: () => submit({ preventDefault() {} }) };
+}
+
+test("adding from a customer filter selects that customer, falls back safely if gone and preserves quote ownership", () => {
+  const f = editorFixture();
+  run(f.context, 'state.jobs=[];state.contacts.push({id:"c2",name:"Other customer"});jobsUi.contact="c2";jobEditor()');
+  assert.match(f.content.innerHTML, /<option value="c2" selected>Other customer/);
+  run(f.context, 'jobsUi.contact="missing-customer";jobEditor()');
+  assert.match(f.content.innerHTML, /<option value="c1" selected>Alex Sample/);
+  assert.doesNotMatch(f.content.innerHTML, /value="missing-customer"/);
+  run(f.context, 'jobsUi.contact="c2";jobEditor(undefined,"q1")');
+  assert.match(f.content.innerHTML, /<option value="c1" selected>Alex Sample/);
+  assert.doesNotMatch(f.content.innerHTML, /<option value="c2" selected>/);
+});
+
+test("successful job mutations are never repeated when refreshing the workspace fails", async (t) => {
+  for (const editing of [false, true]) await t.test(editing ? "PATCH does not republish its customer update" : "POST does not create another job", async () => {
+    const f = editorFixture();
+    if (!editing) f.fields["#job-quote"].value = "";
+    run(f.context, `api=(path,options)=>{calls.push({path,options});return new Promise(resolve=>{resolveSave=resolve})};
+      refresh=async()=>{refreshes++;throw new Error("Temporary refresh failure")};jobEditor(${editing ? '"j1"' : ""})`);
+    const pending = f.submit();
+    assert.equal(f.fields['button[type="submit"]'].disabled, true);
+    await f.submit();
+    assert.equal(f.context.calls.length, 1, "a second submit while saving cannot repeat the mutation");
+    run(f.context, 'resolveSave(savedRecord)');
+    await pending;
+    assert.equal(f.context.refreshes, 1);
+    assert.equal(f.context.calls[0].options.method, editing ? "PATCH" : "POST");
+    assert.match(f.content.innerHTML, /<h2>Job saved<\/h2>/);
+    assert.match(f.content.innerHTML, /data-action="view-job" data-id="saved-job">Open saved job/);
+    assert.doesNotMatch(f.content.innerHTML, /id="dialog-form"|type="submit"/);
+    await f.submit();
+    assert.equal(f.context.calls.length, 1, "the old form handler stays locked after a successful mutation");
+    assert.equal(f.fields['button[type="submit"]'].disabled, true);
+    assert.deepEqual(f.context.notices, ["Job saved."]);
+  });
+});
+
+test("a rejected job mutation can be corrected and retried without a false saved confirmation", async () => {
+  const f = editorFixture();
+  run(f.context, 'api=async(path,options)=>{calls.push({path,options});throw new Error("Enter a service address.")};refresh=async()=>{refreshes++};jobEditor()');
+  await f.submit();
+  assert.equal(f.context.refreshes, 0);
+  assert.equal(f.fields['button[type="submit"]'].disabled, false);
+  assert.match(f.errors.innerHTML, /Enter a service address/);
+  assert.deepEqual(f.context.notices, []);
+  run(f.context, 'api=async(path,options)=>{calls.push({path,options});return savedRecord}');
+  await f.submit();
+  assert.equal(f.context.calls.length, 2);
+  assert.equal(f.context.refreshes, 1);
+  assert.match(f.content.innerHTML, /Internal notes · owner only/);
+  assert.equal(run(f.context, 'state.jobs.find(job=>job.id==="saved-job").title'), job.title);
+  assert.deepEqual(f.context.notices, ["Job saved."]);
+});
+
+test("a saved job renders the returned record without a second read that could invite a mutation retry", async () => {
+  const f = editorFixture();
+  run(f.context, 'api=async(path,options)=>{calls.push({path,options});if(!options)throw new Error("Reads unavailable");return savedRecord};refresh=async()=>{refreshes++};jobEditor()');
+  await f.submit();
+  assert.equal(f.context.calls.length, 1);
+  assert.match(f.content.innerHTML, /Furnace &lt;service&gt;/);
+  assert.match(f.content.innerHTML, /Internal notes · owner only/);
+  assert.deepEqual(f.context.notices, ["Job saved."]);
+});
+
+test("pending job saves never reopen dismissed or switched dialogs", async (t) => {
+  for (const change of ["dismiss", "switch"]) await t.test(change, async () => {
+    const f = editorFixture();
+    run(f.context, 'api=()=>new Promise(resolve=>{resolveSave=resolve});refresh=async()=>{refreshes++;throw new Error("Refresh unavailable")};jobEditor()');
+    const pending = f.submit();
+    run(f.context, change === "dismiss" ? 'closeModal()' : 'state.business={id:"other-business"}');
+    run(f.context, 'resolveSave(savedRecord)');
+    await pending;
+    assert.equal(f.context.refreshes, 0);
+    assert.deepEqual(f.context.notices, []);
+    assert.doesNotMatch(f.content.innerHTML, /<h2>Job saved<\/h2>|Open saved job/);
+  });
+  await t.test("dismissed while refreshing", async () => {
+    const f = editorFixture();
+    run(f.context, 'api=async()=>savedRecord;refresh=()=>new Promise((resolve,reject)=>{rejectRefresh=reject});jobEditor()');
+    const pending = f.submit();
+    await Promise.resolve();
+    run(f.context, 'closeModal();rejectRefresh(new Error("Refresh unavailable"))');
+    await pending;
+    assert.deepEqual(f.context.notices, []);
+    assert.doesNotMatch(f.content.innerHTML, /<h2>Job saved<\/h2>|Open saved job/);
+  });
 });

@@ -966,7 +966,8 @@ function jobEditor(id, quoteId) {
     return;
   }
   const context = base();
-  const contactId = job.contact_id || quote?.contact_id || state.contacts[0].id;
+  const filteredContact = state.contacts.find((contact) => String(contact.id) === String(jobsUi.contact));
+  const contactId = job.contact_id || quote?.contact_id || filteredContact?.id || state.contacts[0].id;
   const title = job.title || quote?.line_items?.[0]?.description || "";
   const description = job.description || (quote?.line_items || []).map((item) => item.description).join("\n");
   const selectedQuote = job.quote_id || quote?.id || "";
@@ -991,18 +992,31 @@ function jobEditor(id, quoteId) {
       if (!$("#job-description", form).value.trim()) $("#job-description", form).value = (picked.line_items || []).map((item) => item.description).join("\n");
     });
   }
+  let submitting = false, savedJob = null;
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (submitting || savedJob) return;
+    submitting = true;
     const submit = $('button[type="submit"]', form);
     submit.disabled = true;
     try {
-      const saved = await api(`${context}/jobs${job.id ? "/" + encodeURIComponent(job.id) : ""}`, { method: job.id ? "PATCH" : "POST", body: JSON.stringify(jobFormPayload(form)) });
+      savedJob = await api(`${context}/jobs${job.id ? "/" + encodeURIComponent(job.id) : ""}`, { method: job.id ? "PATCH" : "POST", body: JSON.stringify(jobFormPayload(form)) });
+    } catch (error) {
+      submitting = false;
+      if (opened === modalGeneration && context === base()) { showFormError($("#dialog-error"), error); submit.disabled = false; }
+      return;
+    }
+    if (opened !== modalGeneration || context !== base()) return;
+    try { await refresh(); }
+    catch {
       if (opened !== modalGeneration || context !== base()) return;
-      await refresh();
-      if (opened !== modalGeneration || context !== base()) return;
-      await jobDetail(saved.id);
+      openModal("Job saved", "Your changes are saved. The workspace couldn’t be refreshed yet.", `<p class="note">You can open the saved job again to check its details. You don’t need to save it a second time.</p><div class="form-actions"><button class="button secondary" data-action="close">Close</button><button class="button" data-action="view-job" data-id="${escape(savedJob.id)}">Open saved job</button></div>`, true);
       toast("Job saved.");
-    } catch (error) { if (opened === modalGeneration && context === base()) { showFormError($("#dialog-error"), error); submit.disabled = false; } }
+      return;
+    }
+    if (opened !== modalGeneration || context !== base()) return;
+    showJobDetail(savedJob);
+    toast("Job saved.");
   });
   syncSchedule();
 }
@@ -1033,7 +1047,10 @@ async function jobDetail(id) {
     throw error;
   }
   if (loading !== modalGeneration || context !== base()) return;
-  // Refresh this record so an edit opened from its detail uses the latest values.
+  showJobDetail(job);
+}
+function showJobDetail(job) {
+  // Use the complete saved/read DTO so editing starts with the latest values.
   const cachedJobs = state.jobs || [];
   state.jobs = cachedJobs.some((item) => String(item.id) === String(job.id)) ? cachedJobs.map((item) => String(item.id) === String(job.id) ? job : item) : [job, ...cachedJobs];
   openModal(escape(job.title), escape(job.contact_name), jobDetailMarkup(job), true);
